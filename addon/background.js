@@ -78,6 +78,10 @@ const handlers = {
     return await B.folders.getSubFolders(folderId, includeSubFolders);
   },
 
+  async "messages.list"({ folderId } = {}) {
+    return await B.messages.list(folderId);
+  },
+
   async "messages.query"({ queryInfo = {} } = {}) {
     return await B.messages.query(queryInfo);
   },

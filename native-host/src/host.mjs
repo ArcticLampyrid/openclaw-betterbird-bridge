@@ -54,6 +54,51 @@ async function callAddon(method, params) {
   });
 }
 
+async function handleMessagesLatest({ folderId, count = 10 }) {
+  const queryResult = await callAddon("messages.query", { queryInfo: { folderId } });
+  if (!queryResult || !queryResult.id) {
+    return [];
+  }
+
+  const headers = [...(queryResult.messages || [])];
+  const messageListId = queryResult.id;
+
+  while (headers.length < count) {
+    const contResult = await callAddon("messages.continueList", { messageListId });
+    if (!contResult || !contResult.messages || contResult.messages.length === 0) {
+      break;
+    }
+    headers.push(...contResult.messages);
+  }
+
+  await callAddon("messages.abortList", { messageListId });
+
+  return headers.slice(0, count);
+}
+
+async function handleMessagesSearch({ folderId, queryInfo = {}, count = 10 }) {
+  const fullQuery = { ...queryInfo, folderId };
+  const queryResult = await callAddon("messages.query", { queryInfo: fullQuery });
+  if (!queryResult || !queryResult.id) {
+    return [];
+  }
+
+  const headers = [...(queryResult.messages || [])];
+  const messageListId = queryResult.id;
+
+  while (headers.length < count) {
+    const contResult = await callAddon("messages.continueList", { messageListId });
+    if (!contResult || !contResult.messages || contResult.messages.length === 0) {
+      break;
+    }
+    headers.push(...contResult.messages);
+  }
+
+  await callAddon("messages.abortList", { messageListId });
+
+  return headers.slice(0, count);
+}
+
 function status() {
   return {
     connected,
@@ -64,7 +109,14 @@ function status() {
 
 async function rpcCall({ method, params, id }) {
   try {
-    const result = await callAddon(method, params);
+    let result;
+    if (method === "messages.latest") {
+      result = await handleMessagesLatest(params);
+    } else if (method === "messages.search") {
+      result = await handleMessagesSearch(params);
+    } else {
+      result = await callAddon(method, params);
+    }
     return { id: id ?? null, ok: true, result };
   } catch (e) {
     return { id: id ?? null, ok: false, error: { message: e.message } };

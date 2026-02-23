@@ -76,6 +76,28 @@ curl -s -X POST \
   http://127.0.0.1:17380/rpc | jq
 ```
 
+### Available Methods
+
+| Method | Description |
+|--------|-------------|
+| `ping` | Health check, returns timestamp |
+| `accounts.list` | List all accounts |
+| `accounts.get` | Get account by ID |
+| `folders.get` | Get folder by ID |
+| `folders.getSubFolders` | Get subfolders of a folder |
+| `messages.list` | List messages in a folder (returns MessageList) |
+| `messages.query` | Query messages with filter |
+| `messages.get` | Get single message header |
+| `messages.read` | Get message header + body + attachments |
+| `messages.latest` | Get latest N messages from a folder (returns headers only) |
+| `messages.search` | Search messages with queryInfo (returns headers only) |
+
+### Smoke Test
+
+```bash
+./scripts/smoke-test.sh
+```
+
 ## Status
 
 - ✅ Project created in `/home/alampy/sources/openclaw-betterbird-bridge`
