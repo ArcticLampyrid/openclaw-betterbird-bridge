@@ -34,8 +34,22 @@ Betterbird will look for the manifest under `~/.mozilla/native-messaging-hosts/`
 Create `~/.config/openclaw/betterbird-bridge.json`:
 
 ```json
-{"port":17380,"token":"<some-random-token>"}
+{
+  "port": 17380,
+  "token": "<some-random-token>",
+  "write": {
+    "enabled": false,
+    "allowHardDelete": false
+  },
+  "compose": {
+    "enabled": false
+  }
+}
 ```
+
+Write methods are **disabled by default**. To enable them, set `write.enabled: true`.
+Compose/send methods are **disabled by default**. To enable them, set `compose.enabled: true`.
+Hard delete (`messages.delete`) is additionally gated by `write.allowHardDelete: true` and `confirm: "DELETE"` per call.
 
 ### 3) Load the addon into Betterbird
 
@@ -91,6 +105,34 @@ curl -s -X POST \
 | `messages.read` | Get message header + body + attachments |
 | `messages.latest` | Get latest N messages from a folder (returns headers only) |
 | `messages.search` | Search messages with queryInfo (returns headers only) |
+| `messages.markRead` | Mark messages as read *(write; supports `dryRun`)* |
+| `messages.markUnread` | Mark messages as unread *(write; supports `dryRun`)* |
+| `messages.move` | Move messages to a folder *(write; supports `dryRun`; can require `allowFolderIds`)* |
+| `messages.archive` | Archive messages using Thunderbird settings *(write; supports `dryRun`; can require `allowFolderIds`)* |
+| `messages.trash` | Move messages to their account trash folder *(write; supports `dryRun`; can require `allowFolderIds`)* |
+| `messages.delete` | Permanently delete messages *(write; **gated**; supports `dryRun`; can require `allowFolderIds`)* |
+| `compose.new` | Compose and send a new email *(compose; supports `dryRun`)* |
+| `compose.reply` | Reply to a message *(compose; supports `dryRun`)* |
+| `compose.forward` | Forward a message *(compose; supports `dryRun`)* |
+
+### Compose guard rails
+
+Compose methods (`compose.new`, `compose.reply`, `compose.forward`) are gated by `compose.enabled` in config (default: `false`).
+
+- `dryRun: true` — validate and return a plan without actually sending.
+- `compose.new` requires at least one `to` recipient.
+- `compose.reply` / `compose.forward` require `messageId`.
+- `compose.forward` additionally requires at least one `to` recipient.
+- Attachments can be included as `[{ name, contentBase64, contentType }]`.
+
+### Write guard rails
+
+The HTTP server enforces a few safety defaults:
+
+- `dryRun: true` — validate and return a plan without performing the write.
+- `allowFolderIds: [ ... ]` — optional per-call allowlist. For destructive methods (move/archive/trash/delete), if provided, the current folder of each message must be in this list. For `messages.move`, the destination `folderId` must also be in the list.
+- Write methods require `write.enabled: true` in config.
+- `messages.delete` additionally requires `write.allowHardDelete: true` and `confirm: "DELETE"`.
 
 ### Smoke Test
 
@@ -101,7 +143,7 @@ curl -s -X POST \
 ## Status
 
 - ✅ Project created in `/home/alampy/sources/openclaw-betterbird-bridge`
-- ✅ Addon scaffold (read-only APIs: accounts/folders/messages)
+- ✅ Addon scaffold (accounts/folders/messages + basic write methods)
 - ✅ Native host scaffold (Native Messaging framing + local HTTP RPC)
 - ✅ End-to-end smoke test working inside Betterbird (`/health`, `ping`, `accounts.list`).
 
