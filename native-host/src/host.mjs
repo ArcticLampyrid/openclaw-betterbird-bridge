@@ -84,6 +84,15 @@ function normalizeIdList(maybeIds) {
   return [maybeIds];
 }
 
+function* walkFolders(folders) {
+  for (const f of folders || []) {
+    yield f;
+    if (f?.subFolders?.length) {
+      yield* walkFolders(f.subFolders);
+    }
+  }
+}
+
 async function assertFolderAllowlist({ messageIds, allowFolderIds }) {
   if (!allowFolderIds) return;
   if (!Array.isArray(allowFolderIds) || allowFolderIds.length === 0) {
@@ -146,49 +155,153 @@ async function validateWriteCall(method, params) {
   return { dryRun, messageIds };
 }
 
-async function handleMessagesLatest({ folderId, count = 10 }) {
-  const queryResult = await callAddon("messages.query", { queryInfo: { folderId } });
-  if (!queryResult || !queryResult.id) {
-    return [];
-  }
+/**
+ * Drain all pages from a messages.query result.
+ * Thunderbird returns messages in ascending date order (oldest first).
+ */
+async function drainMessageList({ queryInfo }) {
+  const queryResult = await callAddon("messages.query", { queryInfo });
+  if (!queryResult) return [];
 
   const headers = [...(queryResult.messages || [])];
   const messageListId = queryResult.id;
 
-  while (headers.length < count) {
-    const contResult = await callAddon("messages.continueList", { messageListId });
-    if (!contResult || !contResult.messages || contResult.messages.length === 0) {
-      break;
+  if (messageListId && headers.length > 0) {
+    try {
+      while (true) {
+        const contResult = await callAddon("messages.continueList", { messageListId });
+        if (!contResult || !contResult.messages || contResult.messages.length === 0) {
+          break;
+        }
+        headers.push(...contResult.messages);
+      }
+    } catch (_) {
+      // Thunderbird throws when the list is exhausted — that's fine.
     }
-    headers.push(...contResult.messages);
+
+    try { await callAddon("messages.abortList", { messageListId }); } catch (_) { /* already done */ }
+  } else if (messageListId) {
+    try { await callAddon("messages.abortList", { messageListId }); } catch (_) { /* ok */ }
   }
 
-  await callAddon("messages.abortList", { messageListId });
+  return headers;
+}
 
+/**
+ * Drain all messages from a query, sort newest-first, return top N.
+ * Used for search where we can't predict total count.
+ */
+async function queryLatest({ queryInfo, count }) {
+  const headers = await drainMessageList({ queryInfo });
+  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
   return headers.slice(0, count);
 }
 
-async function handleMessagesSearch({ folderId, queryInfo = {}, count = 10 }) {
-  const fullQuery = { ...queryInfo, folderId };
-  const queryResult = await callAddon("messages.query", { queryInfo: fullQuery });
-  if (!queryResult || !queryResult.id) {
-    return [];
+/**
+ * Get the latest N messages from a single folder efficiently.
+ * Uses getFolderInfo to know the total, then skips early pages via messages.list pagination.
+ */
+async function listLatestFromFolder({ folderId, count, totalMessageCount = null }) {
+  const targetCount = Math.max(0, Number(count) || 0);
+  if (targetCount === 0) return [];
+
+  let total = totalMessageCount;
+  if (total == null) {
+    const info = await callAddon("folders.getFolderInfo", { folderId });
+    total = Number(info?.totalMessageCount) || 0;
   }
 
-  const headers = [...(queryResult.messages || [])];
-  const messageListId = queryResult.id;
+  if (total <= 0) return [];
 
-  while (headers.length < count) {
-    const contResult = await callAddon("messages.continueList", { messageListId });
-    if (!contResult || !contResult.messages || contResult.messages.length === 0) {
-      break;
+  const listResult = await callAddon("messages.list", { folderId });
+  if (!listResult) return [];
+
+  const firstPageMsgs = listResult.messages || [];
+  const messageListId = listResult.id;
+
+  // If everything fits in the first page, no pagination needed.
+  if (!messageListId || firstPageMsgs.length === 0) {
+    const headers = [...firstPageMsgs];
+    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return headers.slice(0, targetCount);
+  }
+
+  // Calculate how many pages to skip (page size = 100).
+  // We want to keep roughly the last `targetCount` messages.
+  const pagesToSkip = Math.max(0, Math.floor((total - targetCount) / 100));
+  let page = 0; // page 0 = first page (already fetched)
+  const headers = [];
+
+  // Process first page
+  if (page >= pagesToSkip) {
+    headers.push(...firstPageMsgs);
+  }
+
+  // Paginate through the rest
+  try {
+    while (true) {
+      page++;
+      const contResult = await callAddon("messages.continueList", { messageListId });
+      if (!contResult || !contResult.messages || contResult.messages.length === 0) {
+        break;
+      }
+      if (page >= pagesToSkip) {
+        headers.push(...contResult.messages);
+      }
     }
-    headers.push(...contResult.messages);
+  } catch (_) {
+    // Thunderbird throws when the list is exhausted — that's fine.
   }
 
-  await callAddon("messages.abortList", { messageListId });
+  try { await callAddon("messages.abortList", { messageListId }); } catch (_) { /* already done */ }
 
-  return headers.slice(0, count);
+  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return headers.slice(0, targetCount);
+}
+
+async function handleMessagesLatest({ folderId, count = 10 }) {
+  const targetCount = Math.max(0, Number(count) || 0);
+  if (targetCount === 0) return [];
+  return await listLatestFromFolder({ folderId, count: targetCount });
+}
+
+async function handleMessagesLatestAll({ accountId, count = 10 }) {
+  const targetCount = Math.max(0, Number(count) || 0);
+  if (targetCount === 0) return [];
+  const accounts = await callAddon("accounts.list", { includeSubFolders: true });
+  const allHeaders = [];
+
+  for (const acct of accounts || []) {
+    if (accountId && acct?.id !== accountId) continue;
+
+    for (const folder of walkFolders(acct?.folders)) {
+      const folderId = folder?.id;
+      if (!folderId) continue;
+
+      const info = await callAddon("folders.getFolderInfo", { folderId });
+      const total = Number(info?.totalMessageCount) || 0;
+      if (total <= 0) continue;
+
+      const headers = await listLatestFromFolder({
+        folderId,
+        count: targetCount,
+        totalMessageCount: total,
+      });
+      allHeaders.push(...headers);
+    }
+  }
+
+  allHeaders.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return allHeaders.slice(0, targetCount);
+}
+
+async function handleMessagesSearch({ folderId, queryInfo = {}, count = 10 }) {
+  const targetCount = Math.max(0, Number(count) || 0);
+  if (targetCount === 0) return [];
+  return await queryLatest({
+    queryInfo: { ...queryInfo, folderId },
+    count: targetCount,
+  });
 }
 
 async function validateComposeCall(method, params) {
@@ -243,6 +356,8 @@ async function rpcCall({ method, params, id }) {
 
     if (method === "messages.latest") {
       result = await handleMessagesLatest(params);
+    } else if (method === "messages.latestAll") {
+      result = await handleMessagesLatestAll(params);
     } else if (method === "messages.search") {
       result = await handleMessagesSearch(params);
     } else {

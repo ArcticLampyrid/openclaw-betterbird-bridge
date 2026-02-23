@@ -132,6 +132,10 @@ const handlers = {
     return await B.folders.getSubFolders(folderId, includeSubFolders);
   },
 
+  async "folders.getFolderInfo"({ folderId } = {}) {
+    return await B.folders.getFolderInfo(folderId);
+  },
+
   async "messages.list"({ folderId } = {}) {
     return await B.messages.list(folderId);
   },
