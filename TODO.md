@@ -30,11 +30,20 @@
 - [x] Add `compose` + `compose.send` permissions to manifest.json
 
 ## P3 — OpenClaw integration
-- [ ] Add an OpenClaw skill/client wrapper for the local HTTP RPC.
+- [x] Add an OpenClaw skill/client wrapper for the local HTTP RPC.
+  - [x] `SKILL.md` — full method reference, workflows, safety notes
+  - [x] `scripts/bb-rpc.sh` — helper script for quick RPC calls
 - [ ] Convenience endpoints for common workflows (latest in inbox, search by sender/subject, etc.).
 
 ## P4 — reliability, UX, and packaging
-- [ ] Improve error surfaces (propagate addon error details to HTTP client).
-- [ ] Better logging + request correlation id.
-- [ ] More smoke tests (folders, read body, attachments, pagination edge cases).
+- [x] Improve error surfaces (propagate addon error details to HTTP client).
+  - [x] Include method name in error responses
+- [x] Better logging + request correlation id.
+  - [x] Auto-generate correlation id (`auto-<uuid>`) when client omits `id`
+- [x] More smoke tests (folders, read body, attachments, pagination edge cases).
+  - [x] `folders.get` test
+  - [x] `messages.read` body test
+  - [x] Attachments list test
+  - [x] `compose.new` dryRun test
+  - [x] Graceful fallback for empty results
 - [ ] Packaging/versioning notes; document required Thunderbird/Betterbird versions and permissions.

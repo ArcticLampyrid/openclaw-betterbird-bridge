@@ -146,6 +146,9 @@ The HTTP server enforces a few safety defaults:
 - ✅ Addon scaffold (accounts/folders/messages + basic write methods)
 - ✅ Native host scaffold (Native Messaging framing + local HTTP RPC)
 - ✅ End-to-end smoke test working inside Betterbird (`/health`, `ping`, `accounts.list`).
+- ✅ OpenClaw skill created (`~/.openclaw/skills/betterbird-bridge/`) with helper script
+- ✅ Request correlation IDs and improved error responses (method name in errors)
+- ✅ Extended smoke tests (folders, message body, attachments, compose dryRun)
 
 ## Roadmap / TODO
 
