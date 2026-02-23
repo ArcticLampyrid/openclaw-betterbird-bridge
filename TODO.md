@@ -33,7 +33,10 @@
 - [x] Add an OpenClaw skill/client wrapper for the local HTTP RPC.
   - [x] `SKILL.md` — full method reference, workflows, safety notes
   - [x] `scripts/bb-rpc.sh` — helper script for quick RPC calls
-- [ ] Convenience endpoints for common workflows (latest in inbox, search by sender/subject, etc.).
+- [x] Convenience endpoints for common workflows:
+  - [x] `messages.latest` — optimized with page-skipping via `getFolderInfo`
+  - [x] `messages.latestAll` — cross-folder latest (queries each folder's tail, merges)
+  - [x] `messages.search` — search with newest-first sorting
 
 ## P4 — reliability, UX, and packaging
 - [x] Improve error surfaces (propagate addon error details to HTTP client).
