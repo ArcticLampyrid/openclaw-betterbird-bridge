@@ -18,6 +18,67 @@ Let OpenClaw (or any local script) do things like:
 - `native-host/` — Native Messaging host (Node.js) spawned by the addon
   - also exposes an HTTP API on `127.0.0.1` with a bearer token
 
+## Install (dev)
+
+### 1) Install native host manifest
+
+```bash
+cd /home/alampy/sources/openclaw-betterbird-bridge
+./scripts/install-native-host.sh
+```
+
+Betterbird will look for the manifest under `~/.mozilla/native-messaging-hosts/`.
+
+### 2) Create local config (HTTP port + token)
+
+Create `~/.config/openclaw/betterbird-bridge.json`:
+
+```json
+{"port":17380,"token":"<some-random-token>"}
+```
+
+### 3) Load the addon into Betterbird
+
+Option A (recommended for fast testing; not persistent):
+
+- Betterbird → **Tools** → **Developer Tools** → **Debug Add-ons**
+- **Load Temporary Add-on…**
+- select: `/home/alampy/sources/openclaw-betterbird-bridge/addon/manifest.json`
+
+Option B (persistent):
+
+```bash
+./scripts/build-xpi.sh
+```
+
+Then install `dist/openclaw-betterbird-bridge.xpi` via Add-ons Manager.
+(Unsigned add-on policies may apply.)
+
+### 4) Test
+
+Once the addon is loaded, it should spawn the native host, which starts an HTTP server on `127.0.0.1:17380`.
+
+Health:
+
+```bash
+TOKEN=$(jq -r .token ~/.config/openclaw/betterbird-bridge.json)
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:17380/health | jq
+```
+
+RPC example:
+
+```bash
+TOKEN=$(jq -r .token ~/.config/openclaw/betterbird-bridge.json)
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "content-type: application/json" \
+  --data '{"id":1,"method":"ping","params":{}}' \
+  http://127.0.0.1:17380/rpc | jq
+```
+
 ## Status
 
-Scaffold in progress. Next milestone: get a minimal `ping + accounts.list + messages.query + messages.read` roundtrip working.
+- ✅ Project created in `/home/alampy/sources/openclaw-betterbird-bridge`
+- ✅ Addon scaffold (read-only APIs: accounts/folders/messages)
+- ✅ Native host scaffold (Native Messaging framing + local HTTP RPC)
+- ⏳ Waiting for first end-to-end test inside Betterbird (load addon → verify `/health` and `accounts.list`).
