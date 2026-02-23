@@ -1,0 +1,21 @@
+{
+  "manifest_version": 2,
+  "name": "OpenClaw Betterbird Bridge",
+  "version": "0.1.0",
+  "description": "Bridge Betterbird mail APIs to a local native host for automation.",
+  "applications": {
+    "gecko": {
+      "id": "openclaw-betterbird-bridge@openclaw.local",
+      "strict_min_version": "115.0"
+    }
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "permissions": [
+    "accountsRead",
+    "messagesRead",
+    "nativeMessaging",
+    "storage"
+  ]
+}
