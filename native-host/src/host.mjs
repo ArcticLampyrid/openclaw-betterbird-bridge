@@ -71,7 +71,7 @@ async function callAddon(method, params) {
     const timeout = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`Timeout waiting for addon response: ${method}`));
-    }, 30_000);
+    }, 120_000);
 
     pending.set(id, { resolve, reject, timeout });
     send({ type: "request", id, method, params });
