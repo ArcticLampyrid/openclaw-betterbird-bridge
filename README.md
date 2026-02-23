@@ -104,3 +104,7 @@ curl -s -X POST \
 - ✅ Addon scaffold (read-only APIs: accounts/folders/messages)
 - ✅ Native host scaffold (Native Messaging framing + local HTTP RPC)
 - ✅ End-to-end smoke test working inside Betterbird (`/health`, `ping`, `accounts.list`).
+
+## Roadmap / TODO
+
+See: [`TODO.md`](./TODO.md)
