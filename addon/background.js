@@ -101,6 +101,25 @@ function arrayBufferToBase64(buffer) {
   return btoa(bin);
 }
 
+async function addAttachments(tabId, attachments) {
+  if (!attachments || attachments.length === 0) return;
+
+  for (const att of attachments) {
+    // att: { name, contentBase64, contentType }
+    const bytes = Uint8Array.from(atob(att.contentBase64), c => c.charCodeAt(0));
+    const file = new File([bytes], att.name || "attachment", { type: att.contentType || "application/octet-stream" });
+    await B.compose.addAttachment(tabId, { file, name: att.name });
+  }
+}
+
+async function sendCompose(tab, attachments) {
+  if (attachments && attachments.length > 0) {
+    await addAttachments(tab.id, attachments);
+  }
+
+  return await B.compose.sendMessage(tab.id, { mode: "sendNow" });
+}
+
 const handlers = {
   async ping(params) {
     const info = await (B.runtime.getBrowserInfo ? B.runtime.getBrowserInfo() : null);
@@ -369,19 +388,7 @@ const handlers = {
     }
 
     const tab = await B.compose.beginNew(null, details);
-
-    // Add attachments if provided.
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        // att: { name, contentBase64, contentType }
-        const bytes = Uint8Array.from(atob(att.contentBase64), c => c.charCodeAt(0));
-        const file = new File([bytes], att.name || "attachment", { type: att.contentType || "application/octet-stream" });
-        await B.compose.addAttachment(tab.id, { file, name: att.name });
-      }
-    }
-
-    // Send immediately.
-    const sendResult = await B.compose.sendMessage(tab.id, { mode: "sendNow" });
+    const sendResult = await sendCompose(tab, attachments);
 
     return {
       ok: true,
@@ -413,16 +420,7 @@ const handlers = {
     }
 
     const tab = await B.compose.beginReply(messageId, replyType, details);
-
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        const bytes = Uint8Array.from(atob(att.contentBase64), c => c.charCodeAt(0));
-        const file = new File([bytes], att.name || "attachment", { type: att.contentType || "application/octet-stream" });
-        await B.compose.addAttachment(tab.id, { file, name: att.name });
-      }
-    }
-
-    const sendResult = await B.compose.sendMessage(tab.id, { mode: "sendNow" });
+    const sendResult = await sendCompose(tab, attachments);
 
     return {
       ok: true,
@@ -459,16 +457,7 @@ const handlers = {
     }
 
     const tab = await B.compose.beginForward(messageId, forwardType, details);
-
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        const bytes = Uint8Array.from(atob(att.contentBase64), c => c.charCodeAt(0));
-        const file = new File([bytes], att.name || "attachment", { type: att.contentType || "application/octet-stream" });
-        await B.compose.addAttachment(tab.id, { file, name: att.name });
-      }
-    }
-
-    const sendResult = await B.compose.sendMessage(tab.id, { mode: "sendNow" });
+    const sendResult = await sendCompose(tab, attachments);
 
     return {
       ok: true,
