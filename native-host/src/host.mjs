@@ -12,6 +12,8 @@ let nextId = 1;
 /** @type {Map<number, {resolve: Function, reject: Function, timeout: NodeJS.Timeout}>} */
 const pending = new Map();
 
+// ─── Method classification sets ────────────────────────────
+
 const WRITE_METHODS = new Set([
   "messages.markRead",
   "messages.markUnread",
@@ -28,12 +30,13 @@ const COMPOSE_METHODS = new Set([
 ]);
 
 const DESTRUCTIVE_METHODS = new Set([
-  // markRead/markUnread are intentionally not included.
   "messages.move",
   "messages.archive",
   "messages.trash",
   "messages.delete",
 ]);
+
+// ─── Native Messaging plumbing ─────────────────────────────
 
 function send(msg) {
   process.stdout.write(encodeNativeMessage(msg));
@@ -65,6 +68,11 @@ function onNativeMessage(msg) {
 process.stdin.on("data", createNativeMessageReader(onNativeMessage));
 process.stdin.on("end", () => process.exit(0));
 
+/**
+ * Send a request to the addon and await the response.
+ * The addon now only exposes thin relay handlers:
+ *   "api.call", "binary.getAttachment", "binary.getRaw", "compose.addAttachment"
+ */
 async function callAddon(method, params) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
@@ -77,6 +85,16 @@ async function callAddon(method, params) {
     send({ type: "request", id, method, params });
   });
 }
+
+/**
+ * Convenience: call any browser.* API via the addon's generic relay.
+ *   api("messages", "get", messageId)  →  browser.messages.get(messageId)
+ */
+async function api(namespace, method, ...args) {
+  return await callAddon("api.call", { namespace, method, args });
+}
+
+// ─── Utilities ─────────────────────────────────────────────
 
 function normalizeIdList(maybeIds) {
   if (!maybeIds) return [];
@@ -93,6 +111,172 @@ function* walkFolders(folders) {
   }
 }
 
+function hasSpecialUse(folder, specialUse) {
+  const su = folder?.specialUse;
+  if (!Array.isArray(su)) return false;
+  return su.includes(specialUse);
+}
+
+async function findSpecialFolderId({ accountId, specialUse, nameFallback = null }) {
+  if (!accountId) return null;
+  const acct = await api("accounts", "get", accountId, true);
+
+  for (const f of walkFolders(acct?.folders)) {
+    if (hasSpecialUse(f, specialUse)) return f.id;
+  }
+
+  if (nameFallback) {
+    const want = String(nameFallback).toLowerCase();
+    for (const f of walkFolders(acct?.folders)) {
+      if (String(f?.name || "").toLowerCase() === want) return f.id;
+    }
+  }
+
+  return null;
+}
+
+// ─── Message body extraction ───────────────────────────────
+
+async function extractInlineText(messageId) {
+  let parts;
+  try {
+    // TB 128+ supports listInlineTextParts.
+    parts = await api("messages", "listInlineTextParts", messageId);
+  } catch (_) {
+    return { plain: null, html: null, parts: [] };
+  }
+
+  let plain = null;
+  let html = null;
+
+  for (const p of parts || []) {
+    const ct = (p.contentType || "").toLowerCase();
+    if (!plain && ct.startsWith("text/plain")) plain = p.content ?? null;
+    if (!html && ct.startsWith("text/html")) html = p.content ?? null;
+  }
+
+  // If only HTML is available, try to convert (TB 137+).
+  if (!plain && html) {
+    try {
+      plain = await api("messengerUtilities", "convertToPlainText", html);
+    } catch (_) {
+      // not available
+    }
+  }
+
+  return { plain, html, parts };
+}
+
+// ─── Compose helpers ───────────────────────────────────────
+
+async function addAttachments(tabId, attachments) {
+  if (!attachments || attachments.length === 0) return;
+
+  for (const att of attachments) {
+    await callAddon("compose.addAttachment", {
+      tabId,
+      name: att.name,
+      contentBase64: att.contentBase64,
+      contentType: att.contentType,
+    });
+  }
+}
+
+async function sendCompose(tab, attachments) {
+  await addAttachments(tab.id, attachments);
+  return await api("compose", "sendMessage", tab.id, { mode: "sendNow" });
+}
+
+// ─── Pagination helpers ────────────────────────────────────
+
+/**
+ * Drain all pages from a messages.query result.
+ * Thunderbird returns messages in ascending date order (oldest first).
+ */
+async function drainMessageList(listResult) {
+  if (!listResult) return [];
+
+  const headers = [...(listResult.messages || [])];
+  const messageListId = listResult.id;
+
+  if (messageListId && headers.length > 0) {
+    try {
+      while (true) {
+        const contResult = await api("messages", "continueList", messageListId);
+        if (!contResult?.messages?.length) break;
+        headers.push(...contResult.messages);
+      }
+    } catch (_) {
+      // Thunderbird throws when the list is exhausted — that's fine.
+    }
+
+    try { await api("messages", "abortList", messageListId); } catch (_) { /* already done */ }
+  } else if (messageListId) {
+    try { await api("messages", "abortList", messageListId); } catch (_) { /* ok */ }
+  }
+
+  return headers;
+}
+
+/**
+ * Get the latest N messages from a single folder efficiently.
+ * Uses getFolderInfo to know the total, then skips early pages.
+ */
+async function listLatestFromFolder({ folderId, count, totalMessageCount = null }) {
+  const targetCount = Math.max(0, Number(count) || 0);
+  if (targetCount === 0) return [];
+
+  let total = totalMessageCount;
+  if (total == null) {
+    const info = await api("folders", "getFolderInfo", folderId);
+    total = Number(info?.totalMessageCount) || 0;
+  }
+
+  if (total <= 0) return [];
+
+  const listResult = await api("messages", "list", folderId);
+  if (!listResult) return [];
+
+  const firstPageMsgs = listResult.messages || [];
+  const messageListId = listResult.id;
+
+  // If everything fits in the first page, no pagination needed.
+  if (!messageListId || firstPageMsgs.length === 0) {
+    const headers = [...firstPageMsgs];
+    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return headers.slice(0, targetCount);
+  }
+
+  // Calculate how many pages to skip (page size = 100).
+  const pagesToSkip = Math.max(0, Math.floor((total - targetCount) / 100));
+  let page = 0;
+  const headers = [];
+
+  if (page >= pagesToSkip) {
+    headers.push(...firstPageMsgs);
+  }
+
+  try {
+    while (true) {
+      page++;
+      const contResult = await api("messages", "continueList", messageListId);
+      if (!contResult?.messages?.length) break;
+      if (page >= pagesToSkip) {
+        headers.push(...contResult.messages);
+      }
+    }
+  } catch (_) {
+    // exhausted
+  }
+
+  try { await api("messages", "abortList", messageListId); } catch (_) { /* already done */ }
+
+  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return headers.slice(0, targetCount);
+}
+
+// ─── Security validation ───────────────────────────────────
+
 async function assertFolderAllowlist({ messageIds, allowFolderIds }) {
   if (!allowFolderIds) return;
   if (!Array.isArray(allowFolderIds) || allowFolderIds.length === 0) {
@@ -101,9 +285,8 @@ async function assertFolderAllowlist({ messageIds, allowFolderIds }) {
 
   const allowSet = new Set(allowFolderIds);
 
-  // Check each message's current folder is allowlisted.
   for (const messageId of messageIds) {
-    const header = await callAddon("messages.get", { messageId });
+    const header = await api("messages", "get", messageId);
     const folderId = header?.folder?.id;
     if (!folderId) {
       throw new Error(`Message ${messageId} has no folder.id (accountsRead missing? external message?)`);
@@ -123,7 +306,6 @@ async function validateWriteCall(method, params) {
     throw new Error("messageIds is required for write methods");
   }
 
-  // Hard delete should always be explicitly enabled.
   if (method === "messages.delete") {
     if (!cfg.allowHardDelete) {
       throw new Error("Hard delete is disabled (set write.allowHardDelete=true in config)");
@@ -136,7 +318,6 @@ async function validateWriteCall(method, params) {
   if (DESTRUCTIVE_METHODS.has(method)) {
     await assertFolderAllowlist({ messageIds, allowFolderIds: p.allowFolderIds });
 
-    // For moves, also require the destination folder to be allowlisted when allowFolderIds is provided.
     if (method === "messages.move" && p.allowFolderIds) {
       const allowSet = new Set(p.allowFolderIds);
       if (!p.folderId || typeof p.folderId !== "string") {
@@ -155,155 +336,6 @@ async function validateWriteCall(method, params) {
   return { dryRun, messageIds };
 }
 
-/**
- * Drain all pages from a messages.query result.
- * Thunderbird returns messages in ascending date order (oldest first).
- */
-async function drainMessageList({ queryInfo }) {
-  const queryResult = await callAddon("messages.query", { queryInfo });
-  if (!queryResult) return [];
-
-  const headers = [...(queryResult.messages || [])];
-  const messageListId = queryResult.id;
-
-  if (messageListId && headers.length > 0) {
-    try {
-      while (true) {
-        const contResult = await callAddon("messages.continueList", { messageListId });
-        if (!contResult || !contResult.messages || contResult.messages.length === 0) {
-          break;
-        }
-        headers.push(...contResult.messages);
-      }
-    } catch (_) {
-      // Thunderbird throws when the list is exhausted — that's fine.
-    }
-
-    try { await callAddon("messages.abortList", { messageListId }); } catch (_) { /* already done */ }
-  } else if (messageListId) {
-    try { await callAddon("messages.abortList", { messageListId }); } catch (_) { /* ok */ }
-  }
-
-  return headers;
-}
-
-/**
- * Drain all messages from a query, sort newest-first, return top N.
- * Used for search where we can't predict total count.
- */
-async function queryLatest({ queryInfo, count }) {
-  const headers = await drainMessageList({ queryInfo });
-  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return headers.slice(0, count);
-}
-
-/**
- * Get the latest N messages from a single folder efficiently.
- * Uses getFolderInfo to know the total, then skips early pages via messages.list pagination.
- */
-async function listLatestFromFolder({ folderId, count, totalMessageCount = null }) {
-  const targetCount = Math.max(0, Number(count) || 0);
-  if (targetCount === 0) return [];
-
-  let total = totalMessageCount;
-  if (total == null) {
-    const info = await callAddon("folders.getFolderInfo", { folderId });
-    total = Number(info?.totalMessageCount) || 0;
-  }
-
-  if (total <= 0) return [];
-
-  const listResult = await callAddon("messages.list", { folderId });
-  if (!listResult) return [];
-
-  const firstPageMsgs = listResult.messages || [];
-  const messageListId = listResult.id;
-
-  // If everything fits in the first page, no pagination needed.
-  if (!messageListId || firstPageMsgs.length === 0) {
-    const headers = [...firstPageMsgs];
-    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return headers.slice(0, targetCount);
-  }
-
-  // Calculate how many pages to skip (page size = 100).
-  // We want to keep roughly the last `targetCount` messages.
-  const pagesToSkip = Math.max(0, Math.floor((total - targetCount) / 100));
-  let page = 0; // page 0 = first page (already fetched)
-  const headers = [];
-
-  // Process first page
-  if (page >= pagesToSkip) {
-    headers.push(...firstPageMsgs);
-  }
-
-  // Paginate through the rest
-  try {
-    while (true) {
-      page++;
-      const contResult = await callAddon("messages.continueList", { messageListId });
-      if (!contResult || !contResult.messages || contResult.messages.length === 0) {
-        break;
-      }
-      if (page >= pagesToSkip) {
-        headers.push(...contResult.messages);
-      }
-    }
-  } catch (_) {
-    // Thunderbird throws when the list is exhausted — that's fine.
-  }
-
-  try { await callAddon("messages.abortList", { messageListId }); } catch (_) { /* already done */ }
-
-  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return headers.slice(0, targetCount);
-}
-
-async function handleMessagesLatest({ folderId, count = 10 }) {
-  const targetCount = Math.max(0, Number(count) || 0);
-  if (targetCount === 0) return [];
-  return await listLatestFromFolder({ folderId, count: targetCount });
-}
-
-async function handleMessagesLatestAll({ accountId, count = 10 }) {
-  const targetCount = Math.max(0, Number(count) || 0);
-  if (targetCount === 0) return [];
-  const accounts = await callAddon("accounts.list", { includeSubFolders: true });
-  const allHeaders = [];
-
-  for (const acct of accounts || []) {
-    if (accountId && acct?.id !== accountId) continue;
-
-    for (const folder of walkFolders(acct?.folders)) {
-      const folderId = folder?.id;
-      if (!folderId) continue;
-
-      const info = await callAddon("folders.getFolderInfo", { folderId });
-      const total = Number(info?.totalMessageCount) || 0;
-      if (total <= 0) continue;
-
-      const headers = await listLatestFromFolder({
-        folderId,
-        count: targetCount,
-        totalMessageCount: total,
-      });
-      allHeaders.push(...headers);
-    }
-  }
-
-  allHeaders.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return allHeaders.slice(0, targetCount);
-}
-
-async function handleMessagesSearch({ folderId, queryInfo = {}, count = 10 }) {
-  const targetCount = Math.max(0, Number(count) || 0);
-  if (targetCount === 0) return [];
-  return await queryLatest({
-    queryInfo: { ...queryInfo, folderId },
-    count: targetCount,
-  });
-}
-
 async function validateComposeCall(method, params) {
   const p = params && typeof params === "object" ? params : {};
   const dryRun = Boolean(p.dryRun);
@@ -312,7 +344,6 @@ async function validateComposeCall(method, params) {
     throw new Error("Compose/send methods are disabled (set compose.enabled=true in config)");
   }
 
-  // Basic sanity checks.
   if (method === "compose.new") {
     if (!p.to || (Array.isArray(p.to) && p.to.length === 0)) {
       throw new Error("compose.new requires at least one recipient in 'to'");
@@ -332,6 +363,342 @@ async function validateComposeCall(method, params) {
   return { dryRun };
 }
 
+// ─── RPC handlers ──────────────────────────────────────────
+//
+// All business logic lives here; the addon is a thin relay.
+//
+
+const handlers = {
+  // ── Health ──
+
+  async ping(params) {
+    let info = null;
+    try { info = await api("runtime", "getBrowserInfo"); } catch (_) { /* ok */ }
+    return { ok: true, ts: Date.now(), params, browserInfo: info };
+  },
+
+  // ── Accounts & Folders ──
+
+  async "accounts.list"({ includeSubFolders = true } = {}) {
+    return await api("accounts", "list", includeSubFolders);
+  },
+
+  async "accounts.get"({ accountId, includeSubFolders = true } = {}) {
+    return await api("accounts", "get", accountId, includeSubFolders);
+  },
+
+  async "folders.get"({ folderId, includeSubFolders = true } = {}) {
+    return await api("folders", "get", folderId, includeSubFolders);
+  },
+
+  async "folders.getSubFolders"({ folderId, includeSubFolders = true } = {}) {
+    return await api("folders", "getSubFolders", folderId, includeSubFolders);
+  },
+
+  async "folders.getFolderInfo"({ folderId } = {}) {
+    return await api("folders", "getFolderInfo", folderId);
+  },
+
+  // ── Messages (read) ──
+
+  async "messages.list"({ folderId } = {}) {
+    return await api("messages", "list", folderId);
+  },
+
+  async "messages.query"({ queryInfo = {} } = {}) {
+    return await api("messages", "query", queryInfo);
+  },
+
+  async "messages.continueList"({ messageListId } = {}) {
+    return await api("messages", "continueList", messageListId);
+  },
+
+  async "messages.abortList"({ messageListId } = {}) {
+    return await api("messages", "abortList", messageListId);
+  },
+
+  async "messages.get"({ messageId } = {}) {
+    return await api("messages", "get", messageId);
+  },
+
+  async "messages.read"({ messageId, includeAttachments = true } = {}) {
+    const header = await api("messages", "get", messageId);
+    const text = await extractInlineText(messageId);
+
+    let attachments = [];
+    if (includeAttachments) {
+      try {
+        attachments = await api("messages", "listAttachments", messageId);
+      } catch (_) {
+        // listAttachments might not be available
+      }
+    }
+
+    return { header, text, attachments };
+  },
+
+  async "messages.latest"({ folderId, count = 10 } = {}) {
+    const targetCount = Math.max(0, Number(count) || 0);
+    if (targetCount === 0) return [];
+    return await listLatestFromFolder({ folderId, count: targetCount });
+  },
+
+  async "messages.latestAll"({ accountId, count = 10 } = {}) {
+    const targetCount = Math.max(0, Number(count) || 0);
+    if (targetCount === 0) return [];
+
+    const accounts = await api("accounts", "list", true);
+    const allHeaders = [];
+
+    for (const acct of accounts || []) {
+      if (accountId && acct?.id !== accountId) continue;
+
+      for (const folder of walkFolders(acct?.folders)) {
+        const folderId = folder?.id;
+        if (!folderId) continue;
+
+        const info = await api("folders", "getFolderInfo", folderId);
+        const total = Number(info?.totalMessageCount) || 0;
+        if (total <= 0) continue;
+
+        const headers = await listLatestFromFolder({
+          folderId,
+          count: targetCount,
+          totalMessageCount: total,
+        });
+        allHeaders.push(...headers);
+      }
+    }
+
+    allHeaders.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return allHeaders.slice(0, targetCount);
+  },
+
+  async "messages.search"({ folderId, queryInfo = {}, count = 10 } = {}) {
+    const targetCount = Math.max(0, Number(count) || 0);
+    if (targetCount === 0) return [];
+
+    const listResult = await api("messages", "query", { ...queryInfo, folderId });
+    const headers = await drainMessageList(listResult);
+    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return headers.slice(0, targetCount);
+  },
+
+  // ── Raw / Attachments ──
+
+  async "messages.getRaw"({ messageId } = {}) {
+    return await callAddon("binary.getRaw", { messageId });
+  },
+
+  async "attachments.get"({ messageId, partName } = {}) {
+    return await callAddon("binary.getAttachment", { messageId, partName });
+  },
+
+  async "attachments.save"({ messageId, partName } = {}) {
+    return await callAddon("binary.getAttachment", { messageId, partName });
+  },
+
+  // ── Write methods ──
+
+  async "messages.markRead"({ messageIds, dryRun = false } = {}) {
+    const ids = normalizeIdList(messageIds);
+    if (dryRun) {
+      return { ok: true, dryRun: true, method: "messages.markRead", messageIds: ids, changes: { read: true } };
+    }
+
+    for (const id of ids) {
+      await api("messages", "update", id, { read: true });
+    }
+    return { ok: true, updatedCount: ids.length, messageIds: ids };
+  },
+
+  async "messages.markUnread"({ messageIds, dryRun = false } = {}) {
+    const ids = normalizeIdList(messageIds);
+    if (dryRun) {
+      return { ok: true, dryRun: true, method: "messages.markUnread", messageIds: ids, changes: { read: false } };
+    }
+
+    for (const id of ids) {
+      await api("messages", "update", id, { read: false });
+    }
+    return { ok: true, updatedCount: ids.length, messageIds: ids };
+  },
+
+  async "messages.move"({ messageIds, folderId, options, dryRun = false } = {}) {
+    const ids = normalizeIdList(messageIds);
+    if (!folderId) throw new Error("folderId is required");
+
+    if (dryRun) {
+      return { ok: true, dryRun: true, method: "messages.move", messageIds: ids, folderId, options: options ?? null };
+    }
+
+    await api("messages", "move", ids, folderId, options);
+    return { ok: true, movedCount: ids.length, messageIds: ids, folderId };
+  },
+
+  async "messages.archive"({ messageIds, dryRun = false } = {}) {
+    const ids = normalizeIdList(messageIds);
+    if (dryRun) {
+      return { ok: true, dryRun: true, method: "messages.archive", messageIds: ids };
+    }
+
+    await api("messages", "archive", ids);
+    return { ok: true, archivedCount: ids.length, messageIds: ids };
+  },
+
+  async "messages.trash"({ messageIds, dryRun = false } = {}) {
+    const ids = normalizeIdList(messageIds);
+
+    // Find the trash folder for each account.
+    /** @type {Map<string, {messageIds: any[], trashFolderId: string | null}>} */
+    const byAccount = new Map();
+
+    for (const messageId of ids) {
+      const header = await api("messages", "get", messageId);
+      const accountId = header?.folder?.accountId;
+      if (!accountId) {
+        throw new Error(`Cannot determine accountId for message ${messageId}`);
+      }
+
+      let entry = byAccount.get(accountId);
+      if (!entry) {
+        entry = { messageIds: [], trashFolderId: null };
+        byAccount.set(accountId, entry);
+      }
+      entry.messageIds.push(messageId);
+    }
+
+    for (const [accountId, entry] of byAccount) {
+      entry.trashFolderId = await findSpecialFolderId({
+        accountId,
+        specialUse: "trash",
+        nameFallback: "trash",
+      });
+      if (!entry.trashFolderId) {
+        throw new Error(`Trash folder not found for accountId: ${accountId}`);
+      }
+    }
+
+    const plan = [...byAccount.entries()].map(([accountId, entry]) => ({
+      accountId,
+      trashFolderId: entry.trashFolderId,
+      messageIds: entry.messageIds,
+    }));
+
+    if (dryRun) {
+      return { ok: true, dryRun: true, method: "messages.trash", plan };
+    }
+
+    for (const entry of byAccount.values()) {
+      await api("messages", "move", entry.messageIds, entry.trashFolderId);
+    }
+
+    return { ok: true, trashedCount: ids.length, messageIds: ids, plan };
+  },
+
+  async "messages.delete"({ messageIds, dryRun = false } = {}) {
+    const ids = normalizeIdList(messageIds);
+
+    if (dryRun) {
+      return { ok: true, dryRun: true, method: "messages.delete", messageIds: ids, deletePermanently: true };
+    }
+
+    // Prefer the modern options object, fall back to legacy boolean.
+    try {
+      await api("messages", "delete", ids, { deletePermanently: true, isUserAction: true });
+    } catch (_) {
+      await api("messages", "delete", ids, true);
+    }
+
+    return { ok: true, deletedCount: ids.length, messageIds: ids, deletePermanently: true };
+  },
+
+  // ── Compose ──
+
+  async "compose.new"({
+    to, cc, bcc, subject, body, plainTextBody, isPlainText,
+    identityId, attachments, dryRun = false,
+  } = {}) {
+    const details = {};
+    if (to) details.to = Array.isArray(to) ? to : [to];
+    if (cc) details.cc = Array.isArray(cc) ? cc : [cc];
+    if (bcc) details.bcc = Array.isArray(bcc) ? bcc : [bcc];
+    if (subject != null) details.subject = subject;
+    if (isPlainText != null) details.isPlainText = isPlainText;
+    if (body != null) details.body = body;
+    if (plainTextBody != null) details.plainTextBody = plainTextBody;
+    if (identityId) details.identityId = identityId;
+
+    if (dryRun) {
+      return {
+        ok: true, dryRun: true, method: "compose.new",
+        details, attachmentCount: (attachments || []).length,
+      };
+    }
+
+    const tab = await api("compose", "beginNew", null, details);
+    const sendResult = await sendCompose(tab, attachments);
+    return { ok: true, method: "compose.new", tabId: tab.id, sendResult };
+  },
+
+  async "compose.reply"({
+    messageId, replyType = "replyToSender",
+    body, plainTextBody, isPlainText,
+    identityId, attachments, dryRun = false,
+  } = {}) {
+    if (!messageId) throw new Error("messageId is required");
+
+    const details = {};
+    if (isPlainText != null) details.isPlainText = isPlainText;
+    if (body != null) details.body = body;
+    if (plainTextBody != null) details.plainTextBody = plainTextBody;
+    if (identityId) details.identityId = identityId;
+
+    if (dryRun) {
+      return {
+        ok: true, dryRun: true, method: "compose.reply",
+        messageId, replyType, details,
+        attachmentCount: (attachments || []).length,
+      };
+    }
+
+    const tab = await api("compose", "beginReply", messageId, replyType, details);
+    const sendResult = await sendCompose(tab, attachments);
+    return { ok: true, method: "compose.reply", messageId, replyType, tabId: tab.id, sendResult };
+  },
+
+  async "compose.forward"({
+    messageId, forwardType = "forwardAsAttachment",
+    to, cc, bcc, body, plainTextBody, isPlainText,
+    identityId, attachments, dryRun = false,
+  } = {}) {
+    if (!messageId) throw new Error("messageId is required");
+
+    const details = {};
+    if (to) details.to = Array.isArray(to) ? to : [to];
+    if (cc) details.cc = Array.isArray(cc) ? cc : [cc];
+    if (bcc) details.bcc = Array.isArray(bcc) ? bcc : [bcc];
+    if (isPlainText != null) details.isPlainText = isPlainText;
+    if (body != null) details.body = body;
+    if (plainTextBody != null) details.plainTextBody = plainTextBody;
+    if (identityId) details.identityId = identityId;
+
+    if (dryRun) {
+      return {
+        ok: true, dryRun: true, method: "compose.forward",
+        messageId, forwardType, details,
+        attachmentCount: (attachments || []).length,
+      };
+    }
+
+    const tab = await api("compose", "beginForward", messageId, forwardType, details);
+    const sendResult = await sendCompose(tab, attachments);
+    return { ok: true, method: "compose.forward", messageId, forwardType, tabId: tab.id, sendResult };
+  },
+};
+
+// ─── RPC dispatcher ────────────────────────────────────────
+
 function status() {
   return {
     connected,
@@ -348,35 +715,31 @@ function status() {
 }
 
 async function rpcCall({ method, params, id }) {
-  // Ensure every request has a correlation id for tracing.
   const correlationId = id ?? `auto-${crypto.randomUUID()}`;
 
   try {
-    let result;
-
-    if (method === "messages.latest") {
-      result = await handleMessagesLatest(params);
-    } else if (method === "messages.latestAll") {
-      result = await handleMessagesLatestAll(params);
-    } else if (method === "messages.search") {
-      result = await handleMessagesSearch(params);
-    } else {
-      if (WRITE_METHODS.has(method)) {
-        await validateWriteCall(method, params);
-      }
-      if (COMPOSE_METHODS.has(method)) {
-        await validateComposeCall(method, params);
-      }
-      result = await callAddon(method, params);
+    const handler = handlers[method];
+    if (!handler) {
+      return { id: correlationId, ok: false, error: { message: `Unknown method: ${method}`, method } };
     }
 
+    // Security gates.
+    if (WRITE_METHODS.has(method)) {
+      await validateWriteCall(method, params);
+    }
+    if (COMPOSE_METHODS.has(method)) {
+      await validateComposeCall(method, params);
+    }
+
+    const result = await handler(params);
     return { id: correlationId, ok: true, result };
   } catch (e) {
     return { id: correlationId, ok: false, error: { message: e.message, method: method ?? null } };
   }
 }
 
-// Start HTTP server.
+// ─── Boot ──────────────────────────────────────────────────
+
 startHttpServer({
   port: cfg.port,
   token: cfg.token,
@@ -384,5 +747,4 @@ startHttpServer({
   status,
 });
 
-// Tell addon we're ready.
-send({ type: "host-ready", version: "0.1.0" });
+send({ type: "host-ready", version: "0.2.0" });
