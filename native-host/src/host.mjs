@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { encodeNativeMessage, createNativeMessageReader } from "./nativeMessaging.mjs";
 import { loadConfig } from "./config.mjs";
 import { startHttpServer } from "./http.mjs";
@@ -234,6 +235,9 @@ function status() {
 }
 
 async function rpcCall({ method, params, id }) {
+  // Ensure every request has a correlation id for tracing.
+  const correlationId = id ?? `auto-${crypto.randomUUID()}`;
+
   try {
     let result;
 
@@ -251,9 +255,9 @@ async function rpcCall({ method, params, id }) {
       result = await callAddon(method, params);
     }
 
-    return { id: id ?? null, ok: true, result };
+    return { id: correlationId, ok: true, result };
   } catch (e) {
-    return { id: id ?? null, ok: false, error: { message: e.message } };
+    return { id: correlationId, ok: false, error: { message: e.message, method: method ?? null } };
   }
 }
 
