@@ -103,4 +103,4 @@ curl -s -X POST \
 - ✅ Project created in `/home/alampy/sources/openclaw-betterbird-bridge`
 - ✅ Addon scaffold (read-only APIs: accounts/folders/messages)
 - ✅ Native host scaffold (Native Messaging framing + local HTTP RPC)
-- ⏳ Waiting for first end-to-end test inside Betterbird (load addon → verify `/health` and `accounts.list`).
+- ✅ End-to-end smoke test working inside Betterbird (`/health`, `ping`, `accounts.list`).

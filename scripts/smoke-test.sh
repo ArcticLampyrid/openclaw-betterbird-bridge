@@ -35,21 +35,22 @@ ACCOUNTS=$(curl -s -X POST \
   -H "content-type: application/json" \
   --data '{"id":2,"method":"accounts.list","params":{}}' \
   "$BASE_URL/rpc")
-ACCOUNT_COUNT=$(echo "$ACCOUNTS" | jq '[.result[] | select(.type == "account")] | length')
-ACCOUNT_IDS=$(echo "$ACCOUNTS" | jq -r '[.result[] | select(.type == "account") | .id] | join(", ")')
+ACCOUNT_COUNT=$(echo "$ACCOUNTS" | jq '(.result // []) | length')
+ACCOUNT_IDS=$(echo "$ACCOUNTS" | jq -r '(.result // []) | map(.id) | join(", ")')
 echo "count: $ACCOUNT_COUNT"
 echo "ids: $ACCOUNT_IDS"
 
 echo "=== Messages Latest (count=3) ==="
-FOLDER_ID=$(echo "$ACCOUNTS" | jq -r '.result[0].folders[0].id' 2>/dev/null || echo "")
-if [[ -n "$FOLDER_ID" && "$FOLDER_ID" != "null" ]]; then
+# Be robust when there are 0 accounts or folders are missing.
+FOLDER_ID=$(echo "$ACCOUNTS" | jq -r '(.result // []) | .[0].folders[0].id // ""' 2>/dev/null || echo "")
+if [[ -n "$FOLDER_ID" ]]; then
   MESSAGES=$(curl -s -X POST \
     -H "Authorization: Bearer $TOKEN" \
     -H "content-type: application/json" \
     --data "{\"id\":3,\"method\":\"messages.latest\",\"params\":{\"folderId\":\"$FOLDER_ID\",\"count\":3}}" \
     "$BASE_URL/rpc")
-  MSG_COUNT=$(echo "$MESSAGES" | jq '[.result[]] | length')
-  MSG_IDS=$(echo "$MESSAGES" | jq -r '[.result[].id] | join(", ")')
+  MSG_COUNT=$(echo "$MESSAGES" | jq '(.result // []) | length')
+  MSG_IDS=$(echo "$MESSAGES" | jq -r '(.result // []) | map(.id) | join(", ")')
   echo "count: $MSG_COUNT"
   echo "ids: $MSG_IDS"
 else
