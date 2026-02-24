@@ -190,46 +190,93 @@ async function sendCompose(tab, attachments) {
 // ─── Pagination helpers ────────────────────────────────────
 
 /**
- * Drain all pages from a MessageList result.
+ * Iterate all pages from a MessageList result, calling `visitor`
+ * for each batch of messages. Handles continueList/abortList.
  */
-async function drainMessageList(listResult) {
-  if (!listResult) return [];
+async function forEachPage(listResult, visitor) {
+  if (!listResult) return;
 
-  const headers = [...(listResult.messages || [])];
+  const firstPage = listResult.messages || [];
   const messageListId = listResult.id;
 
-  if (messageListId && headers.length > 0) {
-    try {
-      while (true) {
-        const contResult = await api("messages", "continueList", messageListId);
-        if (!contResult?.messages?.length) break;
-        headers.push(...contResult.messages);
-      }
-    } catch (_) {
-      // Thunderbird throws when the list is exhausted — that's fine.
-    }
+  if (firstPage.length > 0) visitor(firstPage);
 
+  if (messageListId) {
+    if (firstPage.length > 0) {
+      try {
+        while (true) {
+          const contResult = await api("messages", "continueList", messageListId);
+          if (!contResult?.messages?.length) break;
+          visitor(contResult.messages);
+        }
+      } catch (_) {
+        // Thunderbird throws when the list is exhausted — that's fine.
+      }
+    }
     try { await api("messages", "abortList", messageListId); } catch (_) { /* already done */ }
-  } else if (messageListId) {
-    try { await api("messages", "abortList", messageListId); } catch (_) { /* ok */ }
+  }
+}
+
+/**
+ * Maintain a top-N set (by date descending) while iterating pages.
+ * Only keeps the newest `count` messages in memory at any time.
+ */
+function createTopN(count) {
+  const heap = [];
+
+  function insert(msgs) {
+    for (const msg of msgs) {
+      const ts = new Date(msg.date).getTime();
+      if (heap.length < count) {
+        heap.push({ ts, msg });
+        // Bubble up to maintain min-heap (smallest ts at index 0).
+        let i = heap.length - 1;
+        while (i > 0) {
+          const parent = (i - 1) >> 1;
+          if (heap[parent].ts <= heap[i].ts) break;
+          [heap[parent], heap[i]] = [heap[i], heap[parent]];
+          i = parent;
+        }
+      } else if (ts > heap[0].ts) {
+        // Replace the smallest (oldest) entry.
+        heap[0] = { ts, msg };
+        // Sift down.
+        let i = 0;
+        while (true) {
+          let smallest = i;
+          const left = 2 * i + 1;
+          const right = 2 * i + 2;
+          if (left < heap.length && heap[left].ts < heap[smallest].ts) smallest = left;
+          if (right < heap.length && heap[right].ts < heap[smallest].ts) smallest = right;
+          if (smallest === i) break;
+          [heap[smallest], heap[i]] = [heap[i], heap[smallest]];
+          i = smallest;
+        }
+      }
+    }
   }
 
-  return headers;
+  function result() {
+    return heap
+      .sort((a, b) => b.ts - a.ts)
+      .map((e) => e.msg);
+  }
+
+  return { insert, result };
 }
 
 /**
  * Get the latest N messages from a single folder.
- * Drains all messages and sorts by date descending, since the
- * return order of messages.list is not guaranteed.
+ * Iterates all pages but only keeps the top N in memory.
  */
 async function listLatestFromFolder({ folderId, count }) {
   const targetCount = Math.max(0, Number(count) || 0);
   if (targetCount === 0) return [];
 
   const listResult = await api("messages", "list", folderId);
-  const headers = await drainMessageList(listResult);
-  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return headers.slice(0, targetCount);
+  const topN = createTopN(targetCount);
+  await forEachPage(listResult, (msgs) => topN.insert(msgs));
+  return topN.result();
 }
 
 // ─── Security validation ───────────────────────────────────
@@ -401,7 +448,7 @@ const handlers = {
     if (targetCount === 0) return [];
 
     const accounts = await api("accounts", "list", true);
-    const allHeaders = [];
+    const topN = createTopN(targetCount);
 
     for (const acct of accounts || []) {
       if (accountId && acct?.id !== accountId) continue;
@@ -410,16 +457,12 @@ const handlers = {
         const folderId = folder?.id;
         if (!folderId) continue;
 
-        const headers = await listLatestFromFolder({
-          folderId,
-          count: targetCount,
-        });
-        allHeaders.push(...headers);
+        const listResult = await api("messages", "list", folderId);
+        await forEachPage(listResult, (msgs) => topN.insert(msgs));
       }
     }
 
-    allHeaders.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return allHeaders.slice(0, targetCount);
+    return topN.result();
   },
 
   async "messages.search"({ folderId, queryInfo = {}, count = 10 } = {}) {
@@ -427,9 +470,9 @@ const handlers = {
     if (targetCount === 0) return [];
 
     const listResult = await api("messages", "query", { ...queryInfo, folderId });
-    const headers = await drainMessageList(listResult);
-    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return headers.slice(0, targetCount);
+    const topN = createTopN(targetCount);
+    await forEachPage(listResult, (msgs) => topN.insert(msgs));
+    return topN.result();
   },
 
   async "messages.unread"({ accountId, folderId, count = 25 } = {}) {
@@ -444,9 +487,9 @@ const handlers = {
     }
 
     const listResult = await api("messages", "query", queryInfo);
-    const headers = await drainMessageList(listResult);
-    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return headers.slice(0, targetCount);
+    const topN = createTopN(targetCount);
+    await forEachPage(listResult, (msgs) => topN.insert(msgs));
+    return topN.result();
   },
 
   // ── Raw / Attachments ──
