@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
+# Deprecated: use ./scripts/build.sh instead.
+# This wrapper exists for backwards compatibility.
 set -euo pipefail
-
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST="$ROOT/dist"
-NAME="openclaw-betterbird-bridge.xpi"
-
-mkdir -p "$DIST"
-(
-  cd "$ROOT/addon"
-  zip -qr "$DIST/$NAME" .
-)
-
-echo "built: $DIST/$NAME"
+echo "Note: build-xpi.sh is deprecated, use build.sh instead." >&2
+exec "$(dirname "${BASH_SOURCE[0]}")/build.sh" "$@"
