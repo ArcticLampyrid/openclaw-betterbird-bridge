@@ -190,8 +190,7 @@ async function sendCompose(tab, attachments) {
 // ─── Pagination helpers ────────────────────────────────────
 
 /**
- * Drain all pages from a messages.query result.
- * Thunderbird returns messages in ascending date order (oldest first).
+ * Drain all pages from a MessageList result.
  */
 async function drainMessageList(listResult) {
   if (!listResult) return [];
@@ -219,60 +218,49 @@ async function drainMessageList(listResult) {
 }
 
 /**
- * Get the latest N messages from a single folder efficiently.
- * Uses getFolderInfo to know the total, then skips early pages.
+ * Collect up to `count` messages from a paginated MessageList result.
+ * Stops reading pages as soon as enough messages are collected.
  */
-async function listLatestFromFolder({ folderId, count, totalMessageCount = null }) {
+async function collectFromMessageList(listResult, count) {
+  if (!listResult) return [];
+
+  const headers = [...(listResult.messages || [])];
+  const messageListId = listResult.id;
+
+  if (messageListId && headers.length < count) {
+    try {
+      while (headers.length < count) {
+        const contResult = await api("messages", "continueList", messageListId);
+        if (!contResult?.messages?.length) break;
+        headers.push(...contResult.messages);
+      }
+    } catch (_) {
+      // exhausted
+    }
+
+    try { await api("messages", "abortList", messageListId); } catch (_) { /* already done */ }
+  } else if (messageListId) {
+    try { await api("messages", "abortList", messageListId); } catch (_) { /* ok */ }
+  }
+
+  return headers.slice(0, count);
+}
+
+/**
+ * Get the latest N messages from a single folder.
+ * Uses messages.list with explicit date-descending sort so we can
+ * stop reading after enough messages are collected.
+ */
+async function listLatestFromFolder({ folderId, count }) {
   const targetCount = Math.max(0, Number(count) || 0);
   if (targetCount === 0) return [];
 
-  let total = totalMessageCount;
-  if (total == null) {
-    const info = await api("folders", "getFolderInfo", folderId);
-    total = Number(info?.totalMessageCount) || 0;
-  }
+  const listResult = await api("messages", "list", folderId, {
+    sortType: "date",
+    sortOrder: "descending",
+  });
 
-  if (total <= 0) return [];
-
-  const listResult = await api("messages", "list", folderId);
-  if (!listResult) return [];
-
-  const firstPageMsgs = listResult.messages || [];
-  const messageListId = listResult.id;
-
-  // If everything fits in the first page, no pagination needed.
-  if (!messageListId || firstPageMsgs.length === 0) {
-    const headers = [...firstPageMsgs];
-    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return headers.slice(0, targetCount);
-  }
-
-  // Calculate how many pages to skip (page size = 100).
-  const pagesToSkip = Math.max(0, Math.floor((total - targetCount) / 100));
-  let page = 0;
-  const headers = [];
-
-  if (page >= pagesToSkip) {
-    headers.push(...firstPageMsgs);
-  }
-
-  try {
-    while (true) {
-      page++;
-      const contResult = await api("messages", "continueList", messageListId);
-      if (!contResult?.messages?.length) break;
-      if (page >= pagesToSkip) {
-        headers.push(...contResult.messages);
-      }
-    }
-  } catch (_) {
-    // exhausted
-  }
-
-  try { await api("messages", "abortList", messageListId); } catch (_) { /* already done */ }
-
-  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
-  return headers.slice(0, targetCount);
+  return await collectFromMessageList(listResult, targetCount);
 }
 
 // ─── Security validation ───────────────────────────────────
@@ -453,14 +441,9 @@ const handlers = {
         const folderId = folder?.id;
         if (!folderId) continue;
 
-        const info = await api("folders", "getFolderInfo", folderId);
-        const total = Number(info?.totalMessageCount) || 0;
-        if (total <= 0) continue;
-
         const headers = await listLatestFromFolder({
           folderId,
           count: targetCount,
-          totalMessageCount: total,
         });
         allHeaders.push(...headers);
       }
