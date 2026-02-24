@@ -153,7 +153,7 @@ sudo tee "$BB_APP_DIR/distribution/policies.json" > /dev/null <<EOF
 EOF
 echo "   → $BB_APP_DIR/distribution/policies.json"
 
-# ── Clean up old per-user installs & profile caches ────────
+# ── Clear profile addon cache ──────────────────────────────
 _find_profiles_ini() {
   for dir in "$HOME/.thunderbird" "$HOME/Library/Thunderbird"; do
     if [[ -f "$dir/profiles.ini" ]]; then echo "$dir/profiles.ini"; return; fi
@@ -173,24 +173,10 @@ _cleanup_profile() {
   profile_dir="$(dirname "$profiles_ini")/$profile_rel"
   [[ -d "$profile_dir" ]] || return
 
-  # Remove old per-user addon installs
-  rm -f "$profile_dir/extensions/$ADDON_ID"
-  rm -f "$profile_dir/extensions/$ADDON_ID.xpi"
-
   # Clear addon startup cache (forces re-discovery)
   rm -f "$profile_dir/addonStartup.json.lz4"
 }
 _cleanup_profile
-
-# Remove old per-user install location
-if [[ -d "$HOME/.local/lib/openclaw-betterbird-bridge" ]]; then
-  rm -rf "$HOME/.local/lib/openclaw-betterbird-bridge"
-  rm -f "$HOME/.local/bin/bb-rpc"
-  echo "   cleaned up old ~/.local install"
-fi
-
-# Remove old per-user native messaging manifest
-rm -f "$HOME/.mozilla/native-messaging-hosts/$NATIVE_HOST_NAME.json"
 
 # ── Create per-user config if missing ──────────────────────
 if [[ ! -f "$CONFIG_FILE" ]]; then
