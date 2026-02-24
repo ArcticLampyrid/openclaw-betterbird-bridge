@@ -25,24 +25,30 @@ Let OpenClaw (or any local script) do things like:
 # 1. Build
 ./scripts/build.sh
 
-# 2. Deploy (installs everything, creates config, restarts Betterbird)
-#    Requires sudo for writing enterprise policy to the Betterbird/Thunderbird app dir
+# 2. Deploy (system-wide install, requires sudo)
 ./scripts/deploy.sh
 
 # 3. Test
 bb-rpc ping '{}'
 ```
 
-After `deploy.sh` completes, the source tree is no longer needed — everything is installed to `~/.local/`.
+After `deploy.sh` completes, the source tree is no longer needed.
 
 ## What Gets Installed
 
+### System-wide (requires sudo)
+
 | Artifact | Location |
 |----------|----------|
-| Native host runtime + addon XPI | `~/.local/lib/openclaw-betterbird-bridge/` |
-| `bb-rpc` helper | `~/.local/bin/bb-rpc` (symlink) |
-| Native messaging manifest | `~/.mozilla/native-messaging-hosts/ai.openclaw.betterbird_bridge.json` |
-| Enterprise policy | `<app-dir>/distribution/policies.json` (force-installs addon, auto-detected) |
+| Native host runtime + addon XPI | `/usr/lib/openclaw-betterbird-bridge/` |
+| `bb-rpc` helper | `/usr/local/bin/bb-rpc` (symlink) |
+| Native messaging manifest | `/usr/lib/mozilla/native-messaging-hosts/` |
+| Enterprise policy | `<app-dir>/distribution/policies.json` (auto-detected) |
+
+### Per-user
+
+| Artifact | Location |
+|----------|----------|
 | Config | `~/.config/openclaw/betterbird-bridge.json` (created if missing, token auto-generated) |
 
 ### Why Enterprise Policy?
@@ -140,9 +146,15 @@ bb-rpc accounts.list '{}'
 # Build distributable artifacts
 ./scripts/build.sh
 
-# Deploy to local system (requires sudo)
+# Deploy system-wide (requires sudo)
 ./scripts/deploy.sh
 
 # Run smoke tests
 ./scripts/smoke-test.sh
 ```
+
+### Overrides
+
+| Env var | Description |
+|---------|-------------|
+| `BB_APP_DIR` | Force Betterbird/Thunderbird app directory (skips auto-detection) |

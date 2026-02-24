@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Deploy pre-built artifacts from dist/ to the local system.
+# Deploy pre-built artifacts from dist/ as a system-wide install.
 # After deployment the source tree is no longer needed.
 #
-# What gets installed:
-#   ~/.local/lib/openclaw-betterbird-bridge/   — native host runtime + addon XPI
-#   ~/.local/bin/bb-rpc                        — RPC helper (symlink)
-#   ~/.mozilla/native-messaging-hosts/...json  — native messaging manifest
-#   <betterbird>/distribution/policies.json    — enterprise policy (force-installs addon)
+# System-wide (requires sudo):
+#   /usr/lib/openclaw-betterbird-bridge/       — native host runtime + addon XPI
+#   /usr/local/bin/bb-rpc                      — RPC helper (symlink)
+#   /usr/lib/mozilla/native-messaging-hosts/   — native messaging manifest
+#   <app-dir>/distribution/policies.json       — enterprise policy (force-installs addon)
+#
+# Per-user (no sudo):
 #   ~/.config/openclaw/betterbird-bridge.json  — config (created if missing)
 set -euo pipefail
 
@@ -15,30 +17,25 @@ DIST="$ROOT/dist"
 
 ADDON_ID="openclaw-betterbird-bridge@openclaw.local"
 NATIVE_HOST_NAME="ai.openclaw.betterbird_bridge"
-INSTALL_DIR="$HOME/.local/lib/openclaw-betterbird-bridge"
-BIN_DIR="$HOME/.local/bin"
+INSTALL_DIR="/usr/lib/openclaw-betterbird-bridge"
+BIN_DIR="/usr/local/bin"
+NM_DIR="/usr/lib/mozilla/native-messaging-hosts"
 CONFIG_FILE="$HOME/.config/openclaw/betterbird-bridge.json"
-# Auto-detect Betterbird/Thunderbird install location.
+
+# ── Auto-detect Betterbird/Thunderbird ──────────────────────
 _find_bb() {
-  # 1. Explicit override via env
   if [[ -n "${BB_APP_DIR:-}" ]]; then
-    echo "$BB_APP_DIR"
-    return
+    echo "$BB_APP_DIR"; return
   fi
-  # 2. Common locations
-  for candidate in /opt/betterbird /usr/lib/betterbird /usr/lib/thunderbird /opt/thunderbird; do
-    if [[ -x "$candidate/betterbird" || -x "$candidate/thunderbird" ]]; then
-      echo "$candidate"
-      return
+  for d in /opt/betterbird /usr/lib/betterbird /usr/lib/thunderbird /opt/thunderbird; do
+    if [[ -x "$d/betterbird" || -x "$d/thunderbird" ]]; then
+      echo "$d"; return
     fi
   done
-  # 3. Resolve from PATH
   local bin
   bin=$(command -v betterbird 2>/dev/null || command -v thunderbird 2>/dev/null || true)
   if [[ -n "$bin" ]]; then
-    bin=$(readlink -f "$bin")
-    echo "$(dirname "$bin")"
-    return
+    echo "$(dirname "$(readlink -f "$bin")")"; return
   fi
   return 1
 }
@@ -52,7 +49,6 @@ if [[ ! -d "$DIST/native-host" || ! -d "$DIST/addon" ]]; then
   echo "Error: dist/ not found or incomplete. Run ./scripts/build.sh first." >&2
   exit 1
 fi
-
 if [[ ! -x "$BB_BIN" ]]; then
   echo "Error: Betterbird/Thunderbird binary not found at $BB_BIN" >&2
   exit 1
@@ -78,27 +74,26 @@ _import_gui_env
 
 # ── Stop Betterbird ────────────────────────────────────────
 echo ":: Stopping Betterbird..."
-_pids() { pgrep -x betterbird 2>/dev/null; pgrep -x betterbird-bin 2>/dev/null; pgrep -x thunderbird 2>/dev/null; pgrep -x thunderbird-bin 2>/dev/null; pgrep -f 'node.*host\.mjs' 2>/dev/null; }
+_pids() {
+  pgrep -x betterbird 2>/dev/null
+  pgrep -x betterbird-bin 2>/dev/null
+  pgrep -x thunderbird 2>/dev/null
+  pgrep -x thunderbird-bin 2>/dev/null
+  pgrep -f 'node.*host\.mjs' 2>/dev/null
+}
 kill $(_pids) 2>/dev/null || true
-for _ in $(seq 1 20); do
-  [[ -z "$(_pids)" ]] && break
-  sleep 0.5
-done
+for _ in $(seq 1 20); do [[ -z "$(_pids)" ]] && break; sleep 0.5; done
 kill -9 $(_pids) 2>/dev/null || true
-for _ in $(seq 1 10); do
-  [[ -z "$(_pids)" ]] && break
-  sleep 0.5
-done
+for _ in $(seq 1 10); do [[ -z "$(_pids)" ]] && break; sleep 0.5; done
 echo "   stopped"
 
-# ── Install to staging dir, then swap atomically ───────────
+# ── Stage files ────────────────────────────────────────────
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 
 echo ":: Preparing install → $INSTALL_DIR"
 cp -r "$DIST/native-host/"* "$STAGING/"
 
-# Create launcher script
 cat > "$STAGING/openclaw-bb-host" <<'LAUNCHER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -106,32 +101,32 @@ exec node "$(dirname "$(readlink -f "$0")")/host.mjs"
 LAUNCHER
 chmod +x "$STAGING/openclaw-bb-host"
 
-# Build addon XPI
 echo ":: Building addon XPI..."
 (cd "$DIST/addon" && zip -qr "$STAGING/addon.xpi" .)
 
-# Copy bb-rpc helper
 cp "$ROOT/scripts/bb-rpc.sh" "$STAGING/bb-rpc"
 chmod +x "$STAGING/bb-rpc"
 
-# Atomic swap: rename old → .bak, move staging → install, remove .bak
-rm -rf "${INSTALL_DIR}.bak"
-mv "$INSTALL_DIR" "${INSTALL_DIR}.bak" 2>/dev/null || true
-mv "$STAGING" "$INSTALL_DIR"
-rm -rf "${INSTALL_DIR}.bak"
+# ── Install system files (sudo) ────────────────────────────
+echo ":: Installing system files (sudo)..."
+
+# Native host + addon XPI
+sudo rm -rf "${INSTALL_DIR}.bak"
+sudo mv "$INSTALL_DIR" "${INSTALL_DIR}.bak" 2>/dev/null || true
+sudo mv "$STAGING" "$INSTALL_DIR"
+sudo chmod 755 "$INSTALL_DIR"
+sudo chown -R root:root "$INSTALL_DIR"
+sudo rm -rf "${INSTALL_DIR}.bak"
 trap - EXIT
 echo "   → $INSTALL_DIR"
 
-# ── Symlink bb-rpc into PATH ──────────────────────────────
-echo ":: Installing bb-rpc → $BIN_DIR/bb-rpc"
-mkdir -p "$BIN_DIR"
-ln -sf "$INSTALL_DIR/bb-rpc" "$BIN_DIR/bb-rpc"
+# bb-rpc symlink
+sudo ln -sf "$INSTALL_DIR/bb-rpc" "$BIN_DIR/bb-rpc"
+echo "   → $BIN_DIR/bb-rpc"
 
-# ── Install native messaging manifest ──────────────────────
-echo ":: Installing native messaging manifest..."
-NM_DIR="$HOME/.mozilla/native-messaging-hosts"
-mkdir -p "$NM_DIR"
-cat > "$NM_DIR/$NATIVE_HOST_NAME.json" <<EOF
+# Native messaging manifest (system-wide)
+sudo mkdir -p "$NM_DIR"
+sudo tee "$NM_DIR/$NATIVE_HOST_NAME.json" > /dev/null <<EOF
 {
   "name": "$NATIVE_HOST_NAME",
   "description": "OpenClaw Betterbird native host",
@@ -142,8 +137,7 @@ cat > "$NM_DIR/$NATIVE_HOST_NAME.json" <<EOF
 EOF
 echo "   → $NM_DIR/$NATIVE_HOST_NAME.json"
 
-# ── Install enterprise policy (force-installs addon) ───────
-echo ":: Installing enterprise policy..."
+# Enterprise policy
 sudo mkdir -p "$BB_APP_DIR/distribution"
 sudo tee "$BB_APP_DIR/distribution/policies.json" > /dev/null <<EOF
 {
@@ -159,14 +153,10 @@ sudo tee "$BB_APP_DIR/distribution/policies.json" > /dev/null <<EOF
 EOF
 echo "   → $BB_APP_DIR/distribution/policies.json"
 
-# ── Clean up profile caches and old installs ───────────────
+# ── Clean up old per-user installs & profile caches ────────
 _find_profiles_ini() {
-  # Linux: ~/.thunderbird, macOS: ~/Library/Thunderbird
   for dir in "$HOME/.thunderbird" "$HOME/Library/Thunderbird"; do
-    if [[ -f "$dir/profiles.ini" ]]; then
-      echo "$dir/profiles.ini"
-      return
-    fi
+    if [[ -f "$dir/profiles.ini" ]]; then echo "$dir/profiles.ini"; return; fi
   done
   return 1
 }
@@ -175,26 +165,34 @@ _cleanup_profile() {
   local profiles_ini
   profiles_ini="$(_find_profiles_ini)" || return
 
-  # Find the locked profile
   local profile_rel
   profile_rel=$(awk -F= '/^\[Install/{found=1} found && /^Default=/{print $2; exit}' "$profiles_ini")
   [[ -n "$profile_rel" ]] || return
 
-  local tb_dir
-  tb_dir="$(dirname "$profiles_ini")"
-  local profile_dir="$tb_dir/$profile_rel"
+  local profile_dir
+  profile_dir="$(dirname "$profiles_ini")/$profile_rel"
   [[ -d "$profile_dir" ]] || return
 
-  # Remove old directory pointer or XPI from profile extensions
+  # Remove old per-user addon installs
   rm -f "$profile_dir/extensions/$ADDON_ID"
   rm -f "$profile_dir/extensions/$ADDON_ID.xpi"
 
-  # Clear addon startup cache (forces Betterbird to re-discover addons)
+  # Clear addon startup cache (forces re-discovery)
   rm -f "$profile_dir/addonStartup.json.lz4"
 }
 _cleanup_profile
 
-# ── Create config if missing ───────────────────────────────
+# Remove old per-user install location
+if [[ -d "$HOME/.local/lib/openclaw-betterbird-bridge" ]]; then
+  rm -rf "$HOME/.local/lib/openclaw-betterbird-bridge"
+  rm -f "$HOME/.local/bin/bb-rpc"
+  echo "   cleaned up old ~/.local install"
+fi
+
+# Remove old per-user native messaging manifest
+rm -f "$HOME/.mozilla/native-messaging-hosts/$NATIVE_HOST_NAME.json"
+
+# ── Create per-user config if missing ──────────────────────
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo ":: Creating default config..."
   mkdir -p "$(dirname "$CONFIG_FILE")"
