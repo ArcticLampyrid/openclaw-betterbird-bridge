@@ -50,23 +50,26 @@ mkdir -p "$EXT_DIR"
 rm -f "$EXT_DIR/$ADDON_ID.xpi"
 echo "$ROOT/addon" > "$EXT_DIR/$ADDON_ID"
 
-# Remove stale addon record from extensions.json so Betterbird
-# re-discovers the addon cleanly on next startup.
+# Ensure addon is enabled in extensions.json (if a record exists).
 if [[ -f "$EXT_JSON" ]]; then
   python3 -c "
 import json, sys
 path, addon_id = sys.argv[1], sys.argv[2]
 with open(path) as f:
     data = json.load(f)
-before = len(data.get('addons', []))
-data['addons'] = [a for a in data.get('addons', []) if a.get('id') != addon_id]
-after = len(data['addons'])
-if before != after:
+changed = False
+for addon in data.get('addons', []):
+    if addon.get('id') == addon_id:
+        if addon.get('userDisabled'):
+            addon['userDisabled'] = False
+            addon['active'] = True
+            changed = True
+if changed:
     with open(path, 'w') as f:
         json.dump(data, f)
-    print('   cleared stale addon record')
+    print('   re-enabled addon in extensions.json')
 else:
-    print('   no stale record found')
+    print('   addon ok')
 " "$EXT_JSON" "$ADDON_ID"
 fi
 echo "   installed: $EXT_DIR/$ADDON_ID -> $ROOT/addon"
