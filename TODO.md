@@ -8,7 +8,6 @@
   - [x] `messages.trash` (default instead of hard delete)
   - [x] `messages.delete` (hard delete; gated/explicit)
 - [x] Add "guard rails":
-  - [x] `dryRun: true` option for write methods
   - [x] allowlist of folderIds for destructive actions
   - [x] explicit confirmation/gating for `delete`
 
@@ -26,7 +25,6 @@
   - [x] `compose.forward` — forward a message
 - [x] Add compose guard rails:
   - [x] `compose.enabled` config gate (disabled by default)
-  - [x] `dryRun` support (validate + return plan without sending)
 - [x] Add `compose` + `compose.send` permissions to manifest.json
 
 ## P3 — OpenClaw integration
@@ -47,6 +45,6 @@
   - [x] `folders.get` test
   - [x] `messages.read` body test
   - [x] Attachments list test
-  - [x] `compose.new` dryRun test
+  - [x] `compose.new` test
   - [x] Graceful fallback for empty results
 - [ ] Packaging/versioning notes; document required Thunderbird/Betterbird versions and permissions.
