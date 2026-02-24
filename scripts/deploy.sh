@@ -31,17 +31,23 @@ echo ":: Installing native host manifest..."
 
 # ── Stop Betterbird (so we can safely modify profile) ───────
 echo ":: Stopping Betterbird..."
-if pgrep -x betterbird > /dev/null 2>&1; then
-  kill $(pgrep -x betterbird) 2>/dev/null || true
-  for _ in $(seq 1 20); do
-    pgrep -x betterbird > /dev/null 2>&1 || break
-    sleep 0.5
-  done
-  # Force kill if still alive (including child processes)
-  kill -9 $(pgrep -x betterbird 2>/dev/null) $(pgrep -x betterbird-bin 2>/dev/null) 2>/dev/null || true
-  sleep 1
-fi
-kill $(pgrep -f 'node.*host\.mjs' 2>/dev/null) 2>/dev/null || true
+# Graceful kill
+kill $(pgrep -x betterbird 2>/dev/null) $(pgrep -x betterbird-bin 2>/dev/null) \
+     $(pgrep -f 'node.*host\.mjs' 2>/dev/null) 2>/dev/null || true
+# Wait for all processes to exit
+for _ in $(seq 1 20); do
+  pgrep -x betterbird > /dev/null 2>&1 || pgrep -x betterbird-bin > /dev/null 2>&1 || \
+  pgrep -f 'node.*host\.mjs' > /dev/null 2>&1 || break
+  sleep 0.5
+done
+# Force kill any survivors
+kill -9 $(pgrep -x betterbird 2>/dev/null) $(pgrep -x betterbird-bin 2>/dev/null) \
+        $(pgrep -f 'node.*host\.mjs' 2>/dev/null) 2>/dev/null || true
+# Final wait
+for _ in $(seq 1 10); do
+  pgrep -x betterbird > /dev/null 2>&1 || pgrep -x betterbird-bin > /dev/null 2>&1 || break
+  sleep 0.5
+done
 echo "   stopped"
 
 # ── Install addon via directory pointer ─────────────────────
