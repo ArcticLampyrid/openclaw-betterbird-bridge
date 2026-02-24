@@ -9,12 +9,21 @@
 #   bb-rpc.sh accounts.list '{}'
 #   bb-rpc.sh messages.latest '{"folderId":"abc","count":5}'
 #
-# Config is read from ~/.config/betterbird-bridge/config.json
+# Config is read from $XDG_CONFIG_HOME/betterbird-bridge/config.json
+# (defaults to ~/.config/betterbird-bridge/config.json)
 
 set -euo pipefail
 
-CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/betterbird-bridge/config.json}"
-DEFAULT_SOCKET_PATH="${HOME}/.cache/betterbird-bridge/bridge.sock"
+CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
+
+CONFIG="${OPENCLAW_BB_CONFIG:-${CONFIG_HOME}/betterbird-bridge/config.json}"
+if [[ -n "$RUNTIME_DIR" ]]; then
+  DEFAULT_SOCKET_PATH="${RUNTIME_DIR}/betterbird-bridge/bridge.sock"
+else
+  DEFAULT_SOCKET_PATH="${CACHE_HOME}/betterbird-bridge/bridge.sock"
+fi
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Error: config not found at $CONFIG" >&2

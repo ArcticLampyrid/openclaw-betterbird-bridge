@@ -53,7 +53,7 @@ After `deploy.sh` completes, the source tree is no longer needed.
 
 | Artifact | Location |
 |----------|----------|
-| Config | `~/.config/betterbird-bridge/config.json` (created if missing) |
+| Config | `$XDG_CONFIG_HOME/betterbird-bridge/config.json` (defaults to `~/.config/...`, created if missing) |
 
 ### Why Enterprise Policy?
 
@@ -61,7 +61,7 @@ Betterbird (Thunderbird ESR) requires addon signatures for profile-level install
 
 ## Config
 
-`~/.config/betterbird-bridge/config.json`:
+`$XDG_CONFIG_HOME/betterbird-bridge/config.json` (defaults to `~/.config/betterbird-bridge/config.json`):
 
 ```json
 {
@@ -69,7 +69,12 @@ Betterbird (Thunderbird ESR) requires addon signatures for profile-level install
 }
 ```
 
-If `socketPath` is omitted, the host defaults to `~/.cache/betterbird-bridge/bridge.sock`.
+If `socketPath` is omitted, the host defaults to:
+
+- `$XDG_RUNTIME_DIR/betterbird-bridge/bridge.sock` when `XDG_RUNTIME_DIR` is available
+- otherwise `$XDG_CACHE_HOME/betterbird-bridge/bridge.sock` (defaults to `~/.cache/...`)
+
+The host automatically creates the socket parent directory when needed.
 
 ## Why No Method Permissions
 

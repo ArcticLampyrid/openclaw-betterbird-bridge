@@ -56,7 +56,13 @@ function removeSocketIfPresent(socketPath) {
 }
 
 function prepareSocketPath(socketPath) {
-  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+  const socketDir = path.dirname(socketPath);
+  fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(socketDir, 0o700);
+  } catch (_) {
+    // best effort
+  }
   removeSocketIfPresent(socketPath);
 }
 

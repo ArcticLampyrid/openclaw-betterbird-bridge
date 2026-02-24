@@ -9,7 +9,7 @@
 #   <app-dir>/distribution/policies.json       — enterprise policy (force-installs addon)
 #
 # Per-user (no sudo):
-#   ~/.config/betterbird-bridge/config.json    — config (created if missing)
+#   $XDG_CONFIG_HOME/betterbird-bridge/config.json (or ~/.config/...) — config
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,8 +20,15 @@ NATIVE_HOST_NAME="ai.openclaw.betterbird_bridge"
 INSTALL_DIR="/usr/lib/openclaw-betterbird-bridge"
 BIN_DIR="/usr/local/bin"
 NM_DIR="/usr/lib/mozilla/native-messaging-hosts"
-CONFIG_FILE="$HOME/.config/betterbird-bridge/config.json"
-SOCKET_PATH="$HOME/.cache/betterbird-bridge/bridge.sock"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
+CONFIG_FILE="$CONFIG_HOME/betterbird-bridge/config.json"
+if [[ -n "$RUNTIME_DIR" ]]; then
+  SOCKET_PATH="$RUNTIME_DIR/betterbird-bridge/bridge.sock"
+else
+  SOCKET_PATH="$CACHE_HOME/betterbird-bridge/bridge.sock"
+fi
 GRACE_TIMEOUT=10
 TARGET_UID="${SUDO_UID:-$(id -u)}"
 
@@ -146,12 +153,10 @@ chmod +x "$STAGING/bb-rpc"
 echo ":: Installing system files (sudo)..."
 
 # Native host + addon XPI
-sudo rm -rf "${INSTALL_DIR}.bak"
-sudo mv "$INSTALL_DIR" "${INSTALL_DIR}.bak" 2>/dev/null || true
+sudo rm -rf "${INSTALL_DIR}"
 sudo mv "$STAGING" "$INSTALL_DIR"
 sudo chmod 755 "$INSTALL_DIR"
 sudo chown -R root:root "$INSTALL_DIR"
-sudo rm -rf "${INSTALL_DIR}.bak"
 trap - EXIT
 echo "   → $INSTALL_DIR"
 
@@ -188,35 +193,11 @@ sudo tee "$BB_APP_DIR/distribution/policies.json" > /dev/null <<EOF
 EOF
 echo "   → $BB_APP_DIR/distribution/policies.json"
 
-# ── Clear profile addon cache ──────────────────────────────
-_find_profiles_ini() {
-  for dir in "$HOME/.thunderbird" "$HOME/Library/Thunderbird"; do
-    if [[ -f "$dir/profiles.ini" ]]; then echo "$dir/profiles.ini"; return; fi
-  done
-  return 1
-}
-
-_cleanup_profile() {
-  local profiles_ini
-  profiles_ini="$(_find_profiles_ini)" || return
-
-  local profile_rel
-  profile_rel=$(awk -F= '/^\[Install/{found=1} found && /^Default=/{print $2; exit}' "$profiles_ini")
-  [[ -n "$profile_rel" ]] || return
-
-  local profile_dir
-  profile_dir="$(dirname "$profiles_ini")/$profile_rel"
-  [[ -d "$profile_dir" ]] || return
-
-  # Clear addon startup cache (forces re-discovery)
-  rm -f "$profile_dir/addonStartup.json.lz4"
-}
-_cleanup_profile
-
 # ── Create per-user config if missing ──────────────────────
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo ":: Creating default config..."
   mkdir -p "$(dirname "$CONFIG_FILE")"
+  mkdir -p "$(dirname "$SOCKET_PATH")"
   cat > "$CONFIG_FILE" <<EOF
 {
   "socketPath": "$SOCKET_PATH"
