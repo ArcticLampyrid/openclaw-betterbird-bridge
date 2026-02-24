@@ -1,167 +1,80 @@
 # openclaw-betterbird-bridge
 
-A local Betterbird/Thunderbird MailExtension + native messaging host that exposes a small local RPC API (over Unix socket) for interacting with the mailbox *through* Betterbird.
+Let [OpenClaw](https://github.com/openclaw/openclaw) (or any local script) talk to your Betterbird / Thunderbird mailbox — read, search, compose, send, and organize mail — without OAuth or Microsoft Graph setup. Betterbird already has the accounts; this bridge just exposes them locally.
 
-## Goal
+> [!NOTE]
+> This project is fully developed & maintained by [OpenClaw](https://github.com/openclaw/openclaw) character **小雪** ❄️, with guidance from 萤火 ✨.
 
-Let OpenClaw (or any local script) do things like:
+## How It Works
 
-- list accounts + folders
-- search messages
-- read message bodies + attachments metadata
-- compose/send/reply/forward emails
-- organize mail (mark read, move, archive, trash, delete)
+A MailExtension addon runs inside Betterbird and spawns a native messaging host (Node.js). The host exposes a local RPC API over a Unix domain socket. You call it with `bb-rpc`:
 
-…without needing Microsoft Graph / OAuth setup. Betterbird already has the accounts configured.
-
-## Architecture
-
-- `addon/` — MailExtension (runs inside Betterbird)
-- `native-host/` — Native Messaging host (Node.js) spawned by the addon; also exposes an HTTP-style RPC API over a Unix domain socket
+```
+Your script / OpenClaw ──bb-rpc──▶ Unix socket ──▶ Native host ──▶ Addon ──▶ Betterbird APIs
+```
 
 ## Quick Start
 
 ```bash
-# 1. Build
-./scripts/build.sh
+git clone https://github.com/ArcticLampyrid/openclaw-betterbird-bridge.git
+cd openclaw-betterbird-bridge
 
-# 2. Deploy (system-wide install, requires sudo)
+# Build & install (requires sudo)
+./scripts/build.sh
 ./scripts/deploy.sh
 
-# 3. Start Betterbird/Thunderbird manually
-betterbird   # or: thunderbird
-
-# 4. Test
+# Start Betterbird, then test:
 bb-rpc ping '{}'
 ```
 
-`deploy.sh` intentionally does not auto-restart Betterbird/Thunderbird.
-After `deploy.sh` completes, the source tree is no longer needed.
-
-## What Gets Installed
-
-### System-wide (requires sudo)
-
-| Artifact | Location |
-|----------|----------|
-| Native host runtime + addon XPI | `/usr/lib/openclaw-betterbird-bridge/` |
-| `bb-rpc` helper | `/usr/local/bin/bb-rpc` (symlink) |
-| Native messaging manifest | `/usr/lib/mozilla/native-messaging-hosts/` |
-| Enterprise policy | `<app-dir>/distribution/policies.json` (auto-detected) |
-
-### Per-user
-
-| Artifact | Location |
-|----------|----------|
-| Config | `$XDG_CONFIG_HOME/betterbird-bridge/config.json` (defaults to `~/.config/...`, created if missing) |
-
-### Why Enterprise Policy?
-
-Betterbird (Thunderbird ESR) requires addon signatures for profile-level installs and doesn't support disabling this via `about:config`. The enterprise policy mechanism (`ExtensionSettings` with `force_installed`) bypasses signature checks entirely and is the officially supported way to sideload addons on ESR builds.
-
-## Config
-
-`$XDG_CONFIG_HOME/betterbird-bridge/config.json` (defaults to `~/.config/betterbird-bridge/config.json`):
-
-```json
-{
-  "socketPath": "/home/<user>/.cache/betterbird-bridge/bridge.sock"
-}
-```
-
-If `socketPath` is omitted, the host defaults to:
-
-- `$XDG_RUNTIME_DIR/betterbird-bridge/bridge.sock` when `XDG_RUNTIME_DIR` is available
-- otherwise `$XDG_CACHE_HOME/betterbird-bridge/bridge.sock` (defaults to `~/.cache/...`)
-
-The host automatically creates the socket parent directory when needed.
-
-## Why No Method Permissions
-
-- This bridge is designed for a trusted local automation caller (your own scripts/agents), so method-level allow/deny gates are intentionally removed.
-- The security boundary is transport-level: the RPC service is exposed only via a Unix domain socket, not a TCP port.
-- The socket file is created with owner-only permissions (`0600`), so only the same local OS user can connect.
-- This keeps the implementation simpler and more predictable while still preventing remote network access.
-
-## Testing
+## Usage
 
 ```bash
-# Health check
-bb-rpc ping '{}'
-
-# List accounts
-bb-rpc accounts.list '{}'
-
-# Smoke test suite
-./scripts/smoke-test.sh
+bb-rpc <method> [json-params]
 ```
 
-## Available Methods
-
-### Read Methods
-
-| Method | Params | Description |
-|--------|--------|-------------|
-| `ping` | `{}` | Health check, returns timestamp + browser info |
-| `accounts.list` | `{includeSubFolders?}` | List all mail accounts (with folder trees) |
-| `accounts.get` | `{accountId, includeSubFolders?}` | Get a single account by ID |
-| `folders.get` | `{folderId, includeSubFolders?}` | Get folder details by ID |
-| `folders.getSubFolders` | `{folderId, includeSubFolders?}` | Get subfolders of a folder |
-| `folders.getFolderInfo` | `{folderId}` | Get folder info (counts) |
-| `messages.list` | `{folderId}` | List messages in a folder |
-| `messages.query` | `{queryInfo}` | Query messages with filter |
-| `messages.get` | `{messageId}` | Get a single message header |
-| `messages.read` | `{messageId, includeAttachments?}` | Get header + body + attachments list |
-| `messages.latest` | `{folderId, count?}` | Latest N messages from a folder (headers) |
-| `messages.latestAll` | `{accountId?, count?}` | Latest N messages across all folders (headers) |
-| `messages.search` | `{folderId, queryInfo?, count?}` | Search messages (headers) |
-| `messages.unread` | `{accountId?, folderId?, count?}` | Unread messages across accounts/folders (headers) |
-| `messages.getRaw` | `{messageId}` | Full RFC 822 source as base64 |
-| `attachments.get` | `{messageId, partName}` | Attachment content as base64 |
-| `attachments.save` | `{messageId, partName}` | Same as attachments.get |
-
-### Write Methods
-
-| Method | Params | Description |
-|--------|--------|-------------|
-| `messages.markRead` | `{messageIds}` | Mark as read |
-| `messages.markUnread` | `{messageIds}` | Mark as unread |
-| `messages.move` | `{messageIds, folderId}` | Move to folder |
-| `messages.archive` | `{messageIds}` | Archive |
-| `messages.trash` | `{messageIds}` | Move to trash |
-| `messages.delete` | `{messageIds}` | Permanently delete |
-
-### Compose Methods
-
-| Method | Params | Description |
-|--------|--------|-------------|
-| `compose.new` | `{to, cc?, bcc?, subject?, body?, ...}` | Compose and send |
-| `compose.reply` | `{messageId, replyType?, body?, ...}` | Reply |
-| `compose.forward` | `{messageId, to, ...}` | Forward |
-
-## Safety
-
-- RPC is exposed via a Unix domain socket only (no TCP listener)
-- Socket permissions are owner-only (`0600`)
-- Betterbird must be running (native host is spawned by addon)
-
-## Development
+### Read Mail
 
 ```bash
-# Build distributable artifacts
-./scripts/build.sh
-
-# Deploy system-wide (requires sudo)
-./scripts/deploy.sh
-
-# Run smoke tests
-./scripts/smoke-test.sh
+bb-rpc messages.unread '{}'                                        # all unread mail
+bb-rpc messages.latest '{"folderId":"account1://INBOX","count":5}' # latest 5 in inbox
+bb-rpc messages.read '{"messageId":12345}'                         # full body + attachments
+bb-rpc messages.search '{"folderId":"ID","queryInfo":{"subject":"invoice"},"count":10}'
 ```
 
-### Overrides
+### Write / Organize
 
-| Env var | Description |
-|---------|-------------|
-| `BB_APP_DIR` | Force Betterbird/Thunderbird app directory (skips auto-detection) |
-| `OPENCLAW_BB_CONFIG` | Override host config file path |
-| `OPENCLAW_BB_SOCKET_PATH` | Override Unix socket path |
+```bash
+bb-rpc messages.markRead '{"messageIds":[12345]}'
+bb-rpc messages.trash '{"messageIds":[12345]}'
+bb-rpc messages.move '{"messageIds":[12345],"folderId":"TARGET_FOLDER_ID"}'
+```
+
+### Compose & Send
+
+```bash
+bb-rpc compose.new '{"to":"bob@example.com","subject":"Hello","body":"<p>Hi!</p>"}'
+bb-rpc compose.reply '{"messageId":12345,"body":"<p>Thanks!</p>"}'
+```
+
+### All Methods
+
+See [INTERNALS.md](INTERNALS.md#available-methods) for the complete method reference.
+
+## OpenClaw Skill
+
+If you use OpenClaw, symlink the included skill for automatic discovery:
+
+```bash
+ln -s /path/to/openclaw-betterbird-bridge/skill ~/.openclaw/skills/betterbird-bridge
+```
+
+## Requirements
+
+- Betterbird or Thunderbird (Linux, tested on Betterbird 140+)
+- Node.js (for the native host)
+- `jq` and `curl` (for the `bb-rpc` helper)
+
+## License
+
+MIT
