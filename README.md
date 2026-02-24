@@ -53,7 +53,7 @@ After `deploy.sh` completes, the source tree is no longer needed.
 
 | Artifact | Location |
 |----------|----------|
-| Config | `~/.config/openclaw/betterbird-bridge.json` (created if missing) |
+| Config | `~/.config/betterbird-bridge/config.json` (created if missing) |
 
 ### Why Enterprise Policy?
 
@@ -61,15 +61,15 @@ Betterbird (Thunderbird ESR) requires addon signatures for profile-level install
 
 ## Config
 
-`~/.config/openclaw/betterbird-bridge.json`:
+`~/.config/betterbird-bridge/config.json`:
 
 ```json
 {
-  "socketPath": "/home/<user>/.cache/openclaw/betterbird-bridge.sock"
+  "socketPath": "/home/<user>/.cache/betterbird-bridge/bridge.sock"
 }
 ```
 
-If `socketPath` is omitted, the host defaults to `~/.cache/openclaw/betterbird-bridge.sock`.
+If `socketPath` is omitted, the host defaults to `~/.cache/betterbird-bridge/bridge.sock`.
 
 ## Why No Method Permissions
 

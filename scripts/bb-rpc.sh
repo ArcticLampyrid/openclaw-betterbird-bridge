@@ -9,12 +9,12 @@
 #   bb-rpc.sh accounts.list '{}'
 #   bb-rpc.sh messages.latest '{"folderId":"abc","count":5}'
 #
-# Config is read from ~/.config/openclaw/betterbird-bridge.json
+# Config is read from ~/.config/betterbird-bridge/config.json
 
 set -euo pipefail
 
-CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/openclaw/betterbird-bridge.json}"
-DEFAULT_SOCKET_PATH="${HOME}/.cache/openclaw/betterbird-bridge.sock"
+CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/betterbird-bridge/config.json}"
+DEFAULT_SOCKET_PATH="${HOME}/.cache/betterbird-bridge/bridge.sock"
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Error: config not found at $CONFIG" >&2

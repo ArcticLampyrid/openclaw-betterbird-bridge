@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/openclaw/betterbird-bridge.json}"
-DEFAULT_SOCKET_PATH="${HOME}/.cache/openclaw/betterbird-bridge.sock"
+CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/betterbird-bridge/config.json}"
+DEFAULT_SOCKET_PATH="${HOME}/.cache/betterbird-bridge/bridge.sock"
 if [[ ! -f "$CONFIG" ]]; then
   echo "Error: config not found at $CONFIG"
   exit 1

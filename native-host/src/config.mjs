@@ -4,14 +4,14 @@ import path from "node:path";
 const DEFAULT_PATH = path.join(
   process.env.HOME || ".",
   ".config",
-  "openclaw",
-  "betterbird-bridge.json",
+  "betterbird-bridge",
+  "config.json",
 );
 const DEFAULT_SOCKET_PATH = path.join(
   process.env.HOME || ".",
   ".cache",
-  "openclaw",
-  "betterbird-bridge.sock",
+  "betterbird-bridge",
+  "bridge.sock",
 );
 
 export function loadConfig() {

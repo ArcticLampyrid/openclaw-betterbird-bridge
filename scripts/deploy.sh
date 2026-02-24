@@ -9,7 +9,7 @@
 #   <app-dir>/distribution/policies.json       — enterprise policy (force-installs addon)
 #
 # Per-user (no sudo):
-#   ~/.config/openclaw/betterbird-bridge.json  — config (created if missing)
+#   ~/.config/betterbird-bridge/config.json    — config (created if missing)
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,8 +20,8 @@ NATIVE_HOST_NAME="ai.openclaw.betterbird_bridge"
 INSTALL_DIR="/usr/lib/openclaw-betterbird-bridge"
 BIN_DIR="/usr/local/bin"
 NM_DIR="/usr/lib/mozilla/native-messaging-hosts"
-CONFIG_FILE="$HOME/.config/openclaw/betterbird-bridge.json"
-SOCKET_PATH="$HOME/.cache/openclaw/betterbird-bridge.sock"
+CONFIG_FILE="$HOME/.config/betterbird-bridge/config.json"
+SOCKET_PATH="$HOME/.cache/betterbird-bridge/bridge.sock"
 GRACE_TIMEOUT=10
 TARGET_UID="${SUDO_UID:-$(id -u)}"
 
