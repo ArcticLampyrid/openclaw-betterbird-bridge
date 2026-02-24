@@ -7,6 +7,12 @@ const DEFAULT_PATH = path.join(
   "openclaw",
   "betterbird-bridge.json",
 );
+const DEFAULT_SOCKET_PATH = path.join(
+  process.env.HOME || ".",
+  ".cache",
+  "openclaw",
+  "betterbird-bridge.sock",
+);
 
 export function loadConfig() {
   const cfgPath = process.env.OPENCLAW_BB_CONFIG || DEFAULT_PATH;
@@ -17,12 +23,9 @@ export function loadConfig() {
     // allow missing
   }
 
-  const port = Number(cfg.port ?? process.env.OPENCLAW_BB_PORT ?? 17380);
-  const token = String(cfg.token ?? process.env.OPENCLAW_BB_TOKEN ?? "");
+  const socketPath = String(
+    process.env.OPENCLAW_BB_SOCKET_PATH ?? cfg.socketPath ?? DEFAULT_SOCKET_PATH,
+  );
 
-  const writeEnabled = Boolean(cfg.write?.enabled ?? false);
-  const allowHardDelete = Boolean(cfg.write?.allowHardDelete ?? false);
-  const composeEnabled = Boolean(cfg.compose?.enabled ?? false);
-
-  return { cfgPath, port, token, writeEnabled, allowHardDelete, composeEnabled };
+  return { cfgPath, socketPath };
 }

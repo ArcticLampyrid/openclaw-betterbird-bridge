@@ -1,33 +1,34 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-CONFIG="${HOME}/.config/openclaw/betterbird-bridge.json"
+CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/openclaw/betterbird-bridge.json}"
+DEFAULT_SOCKET_PATH="${HOME}/.cache/openclaw/betterbird-bridge.sock"
 if [[ ! -f "$CONFIG" ]]; then
   echo "Error: config not found at $CONFIG"
   exit 1
 fi
 
-PORT=$(jq -r '.port // 17380' "$CONFIG")
-TOKEN=$(jq -r '.token // ""' "$CONFIG")
-
-if [[ -z "$TOKEN" ]]; then
-  echo "Error: token not found in config"
-  exit 1
+SOCKET_PATH="${OPENCLAW_BB_SOCKET_PATH:-$(jq -r '.socketPath // empty' "$CONFIG")}"
+if [[ -z "$SOCKET_PATH" ]]; then
+  SOCKET_PATH="$DEFAULT_SOCKET_PATH"
 fi
 
-BASE_URL="http://127.0.0.1:${PORT}"
+if [[ ! -S "$SOCKET_PATH" ]]; then
+  echo "Error: Unix socket not found at $SOCKET_PATH"
+  exit 1
+fi
 
 rpc() {
   local id="$1" method="$2" params="$3"
   curl -s -X POST \
-    -H "Authorization: Bearer $TOKEN" \
+    --unix-socket "$SOCKET_PATH" \
     -H "content-type: application/json" \
     --data "{\"id\":$id,\"method\":\"$method\",\"params\":$params}" \
-    "$BASE_URL/rpc"
+    "http://localhost/rpc"
 }
 
 echo "=== Health ==="
-HEALTH=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE_URL/health")
+HEALTH=$(curl -s --unix-socket "$SOCKET_PATH" "http://localhost/health")
 echo "$HEALTH" | jq '{ok: .connected, addon: .addon.version}'
 
 echo "=== Ping ==="
@@ -97,16 +98,8 @@ else
   echo "(no messages — skipping)"
 fi
 
-echo "=== Compose (validation only) ==="
-# Test that compose rejects invalid calls without sending anything.
-COMPOSE=$(rpc 6 "compose.new" '{"subject":"Smoke Test","body":"<p>Hello</p>"}')
-COMPOSE_OK=$(echo "$COMPOSE" | jq -r '.ok')
-if [[ "$COMPOSE_OK" == "false" ]]; then
-  echo "ok: correctly rejected (no 'to' field)"
-  echo "error: $(echo "$COMPOSE" | jq -r '.error.message // "unknown"')"
-else
-  echo "WARNING: compose.new succeeded without 'to' — unexpected"
-fi
+echo "=== Compose ==="
+echo "(skipped in smoke test to avoid sending mail)"
 
 echo ""
 echo "=== All smoke tests passed ==="

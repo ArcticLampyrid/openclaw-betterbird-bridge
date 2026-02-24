@@ -21,6 +21,9 @@ INSTALL_DIR="/usr/lib/openclaw-betterbird-bridge"
 BIN_DIR="/usr/local/bin"
 NM_DIR="/usr/lib/mozilla/native-messaging-hosts"
 CONFIG_FILE="$HOME/.config/openclaw/betterbird-bridge.json"
+SOCKET_PATH="$HOME/.cache/openclaw/betterbird-bridge.sock"
+GRACE_TIMEOUT=10
+TARGET_UID="${SUDO_UID:-$(id -u)}"
 
 # ── Auto-detect Betterbird/Thunderbird ──────────────────────
 _find_bb() {
@@ -56,35 +59,67 @@ fi
 
 echo ":: Detected app: $BB_BIN"
 
-# ── Resolve graphical session env ───────────────────────────
-_import_gui_env() {
-  for pid in $(pgrep -u "$(id -u)" 2>/dev/null); do
-    if grep -qz 'WAYLAND_DISPLAY\|DISPLAY' "/proc/$pid/environ" 2>/dev/null; then
-      while IFS= read -r -d '' line; do
-        case "$line" in
-          DISPLAY=*|WAYLAND_DISPLAY=*|XDG_RUNTIME_DIR=*|DBUS_SESSION_BUS_ADDRESS=*)
-            export "$line" ;;
-        esac
-      done < "/proc/$pid/environ"
-      return
-    fi
-  done
-}
-_import_gui_env
+stop_with_timeout() {
+  local pid="$1"
+  local timeout="${2:-10}"
 
-# ── Stop Betterbird ────────────────────────────────────────
-echo ":: Stopping Betterbird..."
-_pids() {
-  pgrep -x betterbird 2>/dev/null
-  pgrep -x betterbird-bin 2>/dev/null
-  pgrep -x thunderbird 2>/dev/null
-  pgrep -x thunderbird-bin 2>/dev/null
-  pgrep -f 'node.*host\.mjs' 2>/dev/null
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  kill -TERM "$pid" 2>/dev/null || true
+  local deadline=$((SECONDS + timeout))
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      echo "   PID $pid did not exit in ${timeout}s; sending SIGKILL"
+      kill -KILL "$pid" 2>/dev/null || true
+      break
+    fi
+    sleep 0.2
+  done
+
+  wait "$pid" 2>/dev/null || true
 }
-kill $(_pids) 2>/dev/null || true
-for _ in $(seq 1 20); do [[ -z "$(_pids)" ]] && break; sleep 0.5; done
-kill -9 $(_pids) 2>/dev/null || true
-for _ in $(seq 1 10); do [[ -z "$(_pids)" ]] && break; sleep 0.5; done
+
+_app_pids() {
+  {
+    pgrep -u "$TARGET_UID" -x betterbird 2>/dev/null || true
+    pgrep -u "$TARGET_UID" -x betterbird-bin 2>/dev/null || true
+    pgrep -u "$TARGET_UID" -x thunderbird 2>/dev/null || true
+    pgrep -u "$TARGET_UID" -x thunderbird-bin 2>/dev/null || true
+  } | sort -u
+}
+
+_app_parent_pids() {
+  mapfile -t all_pids < <(_app_pids)
+  [[ ${#all_pids[@]} -gt 0 ]] || return 0
+
+  declare -A app_pid_set=()
+  local pid ppid
+  for pid in "${all_pids[@]}"; do
+    app_pid_set["$pid"]=1
+  done
+
+  for pid in "${all_pids[@]}"; do
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | awk '{print $1}')"
+    if [[ -z "$ppid" || -z "${app_pid_set[$ppid]:-}" ]]; then
+      printf '%s\n' "$pid"
+    fi
+  done | sort -u
+}
+
+# ── Stop Betterbird/Thunderbird ────────────────────────────
+echo ":: Stopping Betterbird/Thunderbird..."
+mapfile -t APP_PARENT_PIDS < <(_app_parent_pids)
+if [[ ${#APP_PARENT_PIDS[@]} -gt 0 ]]; then
+  for pid in "${APP_PARENT_PIDS[@]}"; do
+    echo "   stopping app parent PID $pid"
+    stop_with_timeout "$pid" "$GRACE_TIMEOUT"
+  done
+else
+  echo "   no running app parent process found"
+fi
+
 echo "   stopped"
 
 # ── Stage files ────────────────────────────────────────────
@@ -182,45 +217,22 @@ _cleanup_profile
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo ":: Creating default config..."
   mkdir -p "$(dirname "$CONFIG_FILE")"
-  TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))" 2>/dev/null \
-    || openssl rand -base64 32 2>/dev/null \
-    || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
   cat > "$CONFIG_FILE" <<EOF
 {
-  "port": 17380,
-  "token": "$TOKEN",
-  "write": {
-    "enabled": true,
-    "allowHardDelete": false
-  },
-  "compose": {
-    "enabled": true
-  }
+  "socketPath": "$SOCKET_PATH"
 }
 EOF
-  echo "   → $CONFIG_FILE (token auto-generated)"
+  echo "   → $CONFIG_FILE"
 else
   echo ":: Config exists: $CONFIG_FILE (skipped)"
 fi
 
-# ── Start Betterbird ───────────────────────────────────────
-echo ":: Starting Betterbird..."
-nohup "$BB_BIN" &>/dev/null &
-disown
-
-# ── Wait for native host ──────────────────────────────────
-echo ":: Waiting for native host..."
-for _ in $(seq 1 60); do
-  if pgrep -f 'node.*host\.mjs' > /dev/null 2>&1; then
-    echo "   native host ready (PID $(pgrep -f 'node.*host\.mjs'))"
-    echo ""
-    echo ":: Deploy complete ✅"
-    echo "   Installed to: $INSTALL_DIR"
-    echo "   Config:       $CONFIG_FILE"
-    echo "   RPC helper:   bb-rpc <method> [params]"
-    exit 0
-  fi
-  sleep 1
-done
-
-echo "   ⚠️  native host not detected after 60s (Betterbird may still be loading)"
+echo ""
+echo ":: Deploy complete ✅"
+echo "   Installed to: $INSTALL_DIR"
+echo "   Config:       $CONFIG_FILE"
+echo "   Socket:       $SOCKET_PATH"
+echo "   RPC helper:   bb-rpc <method> [params]"
+echo ""
+echo ":: Manual step required"
+echo "   Start Betterbird/Thunderbird yourself: $BB_BIN"

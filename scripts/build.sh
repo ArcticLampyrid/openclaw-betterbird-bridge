@@ -11,12 +11,12 @@ mkdir -p "$DIST/native-host" "$DIST/addon"
 
 # ── 1. Addon ────────────────────────────────────────────────
 echo ":: Copying addon..."
-cp "$ROOT/addon/"* "$DIST/addon/"
+cp -r "$ROOT/addon/." "$DIST/addon/"
 echo "   → dist/addon/"
 
 # ── 2. Native host sources (pure Node.js, no bundling needed)
 echo ":: Copying native host..."
-cp "$ROOT/native-host/src/"*.mjs "$DIST/native-host/"
+cp -r "$ROOT/native-host/src/." "$DIST/native-host/"
 cp "$ROOT/native-host/package.json" "$DIST/native-host/"
 echo "   → dist/native-host/"
 

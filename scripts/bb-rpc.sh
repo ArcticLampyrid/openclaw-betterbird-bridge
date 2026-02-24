@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # bb-rpc.sh — simplified RPC caller for Betterbird Bridge
 #
 # Usage:
@@ -14,17 +14,20 @@
 set -euo pipefail
 
 CONFIG="${OPENCLAW_BB_CONFIG:-${HOME}/.config/openclaw/betterbird-bridge.json}"
+DEFAULT_SOCKET_PATH="${HOME}/.cache/openclaw/betterbird-bridge.sock"
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Error: config not found at $CONFIG" >&2
   exit 1
 fi
 
-PORT=$(jq -r '.port // 17380' "$CONFIG")
-TOKEN=$(jq -r '.token // ""' "$CONFIG")
+SOCKET_PATH="${OPENCLAW_BB_SOCKET_PATH:-$(jq -r '.socketPath // empty' "$CONFIG")}"
+if [[ -z "$SOCKET_PATH" ]]; then
+  SOCKET_PATH="$DEFAULT_SOCKET_PATH"
+fi
 
-if [[ -z "$TOKEN" ]]; then
-  echo "Error: token not found in config" >&2
+if [[ ! -S "$SOCKET_PATH" ]]; then
+  echo "Error: Unix socket not found at $SOCKET_PATH" >&2
   exit 1
 fi
 
@@ -35,7 +38,7 @@ PARAMS="${2:-{\}}"
 ID=$(($(date +%s%N) / 1000000 % 1000000))
 
 curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
+  --unix-socket "$SOCKET_PATH" \
   -H "content-type: application/json" \
   --data "{\"id\":$ID,\"method\":\"$METHOD\",\"params\":$PARAMS}" \
-  "http://127.0.0.1:${PORT}/rpc" | jq .
+  "http://localhost/rpc" | jq .

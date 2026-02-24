@@ -1,66 +1,125 @@
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 
-function readJson(req) {
+const JSON_HEADERS = { "content-type": "application/json" };
+const MAX_BODY_BYTES = 1 * 1024 * 1024;
+const SOCKET_MODE = 0o600;
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, JSON_HEADERS);
+  res.end(JSON.stringify(payload));
+}
+
+function readJson(req, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
   return new Promise((resolve, reject) => {
     let data = "";
+    let bytes = 0;
+
     req.setEncoding("utf8");
-    req.on("data", chunk => (data += chunk));
+    req.on("data", (chunk) => {
+      data += chunk;
+      bytes += Buffer.byteLength(chunk, "utf8");
+      if (bytes > maxBodyBytes) {
+        const err = new Error("request body too large");
+        err.code = "PAYLOAD_TOO_LARGE";
+        reject(err);
+        req.destroy();
+      }
+    });
+
     req.on("end", () => {
       if (!data) return resolve(null);
+
       try {
         resolve(JSON.parse(data));
       } catch (e) {
+        e.code = "INVALID_JSON";
         reject(e);
       }
     });
+
     req.on("error", reject);
   });
 }
 
-function unauthorized(res) {
-  res.writeHead(401, { "content-type": "application/json" });
-  res.end(JSON.stringify({ error: "unauthorized" }));
+function removeSocketIfPresent(socketPath) {
+  try {
+    const stat = fs.lstatSync(socketPath);
+    if (!stat.isSocket()) {
+      throw new Error(`Socket path exists and is not a socket: ${socketPath}`);
+    }
+    fs.unlinkSync(socketPath);
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+  }
 }
 
-export function startHttpServer({ port, token, rpcCall, status }) {
+function prepareSocketPath(socketPath) {
+  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+  removeSocketIfPresent(socketPath);
+}
+
+export function startHttpServer({ socketPath, rpcCall, status }) {
+  if (!socketPath) {
+    throw new Error("socketPath is required");
+  }
+
+  prepareSocketPath(socketPath);
+
   const server = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url, `http://${req.headers.host}`);
+      const host = req.headers.host || "localhost";
+      const url = new URL(req.url || "/", `http://${host}`);
 
       if (url.pathname === "/health") {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, ...status() }));
+        sendJson(res, 200, { ok: true, ...status() });
         return;
       }
 
       if (url.pathname === "/rpc" && req.method === "POST") {
-        // token via header or query
-        const auth = req.headers.authorization || "";
-        const qToken = url.searchParams.get("token") || "";
-        const got = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : qToken;
-
-        if (token && got !== token) {
-          unauthorized(res);
-          return;
-        }
-
         const body = await readJson(req);
         const { method, params, id } = body || {};
 
         const result = await rpcCall({ method, params, id });
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify(result));
+        sendJson(res, 200, result);
         return;
       }
 
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "not_found" }));
+      sendJson(res, 404, { error: "not_found" });
     } catch (e) {
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "internal_error", message: String(e?.message || e) }));
+      if (e?.code === "INVALID_JSON") {
+        sendJson(res, 400, { error: "invalid_json", message: e.message });
+        return;
+      }
+
+      if (e?.code === "PAYLOAD_TOO_LARGE") {
+        sendJson(res, 413, { error: "payload_too_large", maxBytes: MAX_BODY_BYTES });
+        return;
+      }
+
+      sendJson(res, 500, { error: "internal_error", message: String(e?.message || e) });
     }
   });
 
-  server.listen(port, "127.0.0.1");
+  server.listen(socketPath, () => {
+    try {
+      fs.chmodSync(socketPath, SOCKET_MODE);
+    } catch (_) {
+      // best effort
+    }
+  });
+
+  const cleanup = () => {
+    try {
+      removeSocketIfPresent(socketPath);
+    } catch (_) {
+      // best effort
+    }
+  };
+
+  process.on("exit", cleanup);
+  server.on("close", cleanup);
+
   return server;
 }

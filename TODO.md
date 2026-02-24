@@ -1,54 +1,25 @@
 # TODO / Roadmap
 
-## P0 — safety + write actions
-- [x] Add write methods (with safety defaults):
-  - [x] `messages.markRead` / `messages.markUnread`
-  - [x] `messages.move`
-  - [x] `messages.archive` (if applicable; otherwise map to move)
-  - [x] `messages.trash` (default instead of hard delete)
-  - [x] `messages.delete` (hard delete; gated/explicit)
-- [x] Add "guard rails":
-  - [x] allowlist of folderIds for destructive actions
-  - [x] explicit confirmation/gating for `delete`
+## Completed (current baseline)
+- [x] Refactor native host into focused modules (`rpc/handlers`, pagination, mail/compose helpers).
+- [x] Keep addon as a thin relay; move business logic into native host.
+- [x] Improve binary/base64 handling in addon (`messages.getRaw`, attachments).
+- [x] Improve HTTP error handling (invalid JSON, payload-too-large, structured JSON responses).
+- [x] Move bridge transport from localhost token-auth HTTP to Unix domain socket (`socketPath`).
+- [x] Remove method-level permission gates/guard rails for trusted local caller model.
+- [x] Update helper scripts (`bb-rpc.sh`, `smoke-test.sh`, `build.sh`) for socket-based workflow.
+- [x] Simplify deployment behavior: stop app parent process(es), install artifacts, require manual restart.
 
-## P1 — attachments + exports
-- [x] Attachment content download/export:
-  - [x] `attachments.get` (base64)
-  - [x] `attachments.save` (returns base64; host can write to disk)
-- [x] Message export helpers:
-  - [x] `messages.getRaw` (full RFC 822 source as base64)
+## P0 — reliability
+- [ ] Add automated tests for RPC handlers (mocked `api` and `callAddon`).
+- [ ] Add deployment verification command (single command to check socket + `ping`).
+- [ ] Improve deploy failure diagnostics (clear hints when app starts but addon/native host is not connected).
 
-## P2 — compose + send
-- [x] Add compose/send methods:
-  - [x] `compose.new` — create and send a new email
-  - [x] `compose.reply` — reply to a message
-  - [x] `compose.forward` — forward a message
-- [x] Add compose guard rails:
-  - [x] `compose.enabled` config gate (disabled by default)
-- [x] Add `compose` + `compose.send` permissions to manifest.json
+## P1 — developer ergonomics
+- [ ] Add a `bb-rpc wait` helper (poll `/health` or `ping` until ready / timeout).
+- [ ] Add `deploy.sh --no-stop` mode for users who prefer manual shutdown.
+- [ ] Add troubleshooting section for desktop-session startup caveats.
 
-## P3 — OpenClaw integration
-- [x] Add an OpenClaw skill/client wrapper for the local HTTP RPC.
-  - [x] `SKILL.md` — full method reference, workflows, safety notes
-  - [x] `scripts/bb-rpc.sh` — helper script for quick RPC calls
-- [x] Convenience endpoints for common workflows:
-  - [x] `messages.latest` — optimized with page-skipping via `getFolderInfo`
-  - [x] `messages.latestAll` — cross-folder latest (queries each folder's tail, merges)
-  - [x] `messages.search` — search with newest-first sorting
-
-## P4 — reliability, UX, and packaging
-- [x] Improve error surfaces (propagate addon error details to HTTP client).
-  - [x] Include method name in error responses
-- [x] Better logging + request correlation id.
-  - [x] Auto-generate correlation id (`auto-<uuid>`) when client omits `id`
-- [x] More smoke tests (folders, read body, attachments, pagination edge cases).
-  - [x] `folders.get` test
-  - [x] `messages.read` body test
-  - [x] Attachments list test
-  - [x] `compose.new` test
-  - [x] Graceful fallback for empty results
-- [x] Packaging/versioning notes; document required Thunderbird/Betterbird versions and permissions.
-  - [x] Self-contained `build.sh` + `deploy.sh` (source tree not needed after deploy)
-  - [x] Enterprise policy for unsigned addon sideloading on ESR builds
-  - [x] Auto-detect Betterbird/Thunderbird location
-  - [x] Version numbers unified across manifest/host/package.json
+## P2 — feature polish
+- [ ] Add optional convenience endpoint to save attachment directly to a host path.
+- [ ] Add richer query presets (`today`, `last7d`, sender/domain shortcuts) on top of `messages.query`.

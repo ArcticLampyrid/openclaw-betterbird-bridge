@@ -23,14 +23,34 @@ function serializeError(err) {
   };
 }
 
-/** Convert an ArrayBuffer to a base64 string (works in addon context). */
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let bin = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    bin += String.fromCharCode(bytes[i]);
+function bytesToBase64(bytes) {
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
   }
-  return btoa(bin);
+
+  return btoa(binary);
+}
+
+function arrayBufferToBase64(buffer) {
+  return bytesToBase64(new Uint8Array(buffer));
+}
+
+function textToBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  return bytesToBase64(bytes);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 // ─── Handlers ───────────────────────────────────────────────
@@ -90,8 +110,7 @@ const handlers = {
     } catch (_) {
       try {
         const text = await file.text();
-        const bytes = new TextEncoder().encode(text);
-        base64 = arrayBufferToBase64(bytes.buffer);
+        base64 = textToBase64(text);
       } catch (__) {
         // give up
       }
@@ -116,10 +135,11 @@ const handlers = {
     const raw = await B.messages.getRaw(messageId);
 
     if (typeof raw === "string") {
+      const bytes = new TextEncoder().encode(raw);
       return {
         messageId,
-        rawBase64: btoa(unescape(encodeURIComponent(raw))),
-        size: raw.length,
+        rawBase64: bytesToBase64(bytes),
+        size: bytes.byteLength,
       };
     }
 
@@ -144,7 +164,7 @@ const handlers = {
     if (!tabId) throw new Error("tabId is required");
     if (!contentBase64) throw new Error("contentBase64 is required");
 
-    const bytes = Uint8Array.from(atob(contentBase64), c => c.charCodeAt(0));
+    const bytes = base64ToBytes(contentBase64);
     const file = new File(
       [bytes],
       name || "attachment",
