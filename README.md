@@ -26,7 +26,7 @@ Let OpenClaw (or any local script) do things like:
 ./scripts/build.sh
 
 # 2. Deploy (installs everything, creates config, restarts Betterbird)
-#    Requires sudo for writing enterprise policy to /opt/betterbird/
+#    Requires sudo for writing enterprise policy to the Betterbird/Thunderbird app dir
 ./scripts/deploy.sh
 
 # 3. Test
@@ -42,7 +42,7 @@ After `deploy.sh` completes, the source tree is no longer needed — everything 
 | Native host runtime + addon XPI | `~/.local/lib/openclaw-betterbird-bridge/` |
 | `bb-rpc` helper | `~/.local/bin/bb-rpc` (symlink) |
 | Native messaging manifest | `~/.mozilla/native-messaging-hosts/ai.openclaw.betterbird_bridge.json` |
-| Enterprise policy | `/opt/betterbird/distribution/policies.json` (force-installs addon) |
+| Enterprise policy | `<app-dir>/distribution/policies.json` (force-installs addon, auto-detected) |
 | Config | `~/.config/openclaw/betterbird-bridge.json` (created if missing, token auto-generated) |
 
 ### Why Enterprise Policy?

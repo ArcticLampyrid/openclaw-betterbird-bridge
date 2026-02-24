@@ -47,4 +47,8 @@
   - [x] Attachments list test
   - [x] `compose.new` test
   - [x] Graceful fallback for empty results
-- [ ] Packaging/versioning notes; document required Thunderbird/Betterbird versions and permissions.
+- [x] Packaging/versioning notes; document required Thunderbird/Betterbird versions and permissions.
+  - [x] Self-contained `build.sh` + `deploy.sh` (source tree not needed after deploy)
+  - [x] Enterprise policy for unsigned addon sideloading on ESR builds
+  - [x] Auto-detect Betterbird/Thunderbird location
+  - [x] Version numbers unified across manifest/host/package.json

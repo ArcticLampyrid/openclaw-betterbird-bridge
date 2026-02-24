@@ -97,16 +97,15 @@ else
   echo "(no messages — skipping)"
 fi
 
-echo "=== Compose New (dryRun) ==="
-COMPOSE=$(rpc 6 "compose.new" '{"to":"test@example.com","subject":"Smoke Test","body":"<p>Hello</p>","dryRun":true}')
+echo "=== Compose (validation only) ==="
+# Test that compose rejects invalid calls without sending anything.
+COMPOSE=$(rpc 6 "compose.new" '{"subject":"Smoke Test","body":"<p>Hello</p>"}')
 COMPOSE_OK=$(echo "$COMPOSE" | jq -r '.ok')
-COMPOSE_DRY=$(echo "$COMPOSE" | jq -r '.result.dryRun // false')
-echo "ok: $COMPOSE_OK"
-echo "dryRun: $COMPOSE_DRY"
-if [[ "$COMPOSE_OK" == "true" ]]; then
-  echo "details: $(echo "$COMPOSE" | jq -c '.result.details // {}')"
-else
+if [[ "$COMPOSE_OK" == "false" ]]; then
+  echo "ok: correctly rejected (no 'to' field)"
   echo "error: $(echo "$COMPOSE" | jq -r '.error.message // "unknown"')"
+else
+  echo "WARNING: compose.new succeeded without 'to' — unexpected"
 fi
 
 echo ""

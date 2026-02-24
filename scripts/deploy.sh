@@ -18,8 +18,34 @@ NATIVE_HOST_NAME="ai.openclaw.betterbird_bridge"
 INSTALL_DIR="$HOME/.local/lib/openclaw-betterbird-bridge"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_FILE="$HOME/.config/openclaw/betterbird-bridge.json"
-BB_BIN="/opt/betterbird/betterbird"
-BB_APP_DIR="/opt/betterbird"
+# Auto-detect Betterbird/Thunderbird install location.
+_find_bb() {
+  # 1. Explicit override via env
+  if [[ -n "${BB_APP_DIR:-}" ]]; then
+    echo "$BB_APP_DIR"
+    return
+  fi
+  # 2. Common locations
+  for candidate in /opt/betterbird /usr/lib/betterbird /usr/lib/thunderbird /opt/thunderbird; do
+    if [[ -x "$candidate/betterbird" || -x "$candidate/thunderbird" ]]; then
+      echo "$candidate"
+      return
+    fi
+  done
+  # 3. Resolve from PATH
+  local bin
+  bin=$(command -v betterbird 2>/dev/null || command -v thunderbird 2>/dev/null || true)
+  if [[ -n "$bin" ]]; then
+    bin=$(readlink -f "$bin")
+    echo "$(dirname "$bin")"
+    return
+  fi
+  return 1
+}
+
+BB_APP_DIR="$(_find_bb)" || { echo "Error: Betterbird/Thunderbird not found. Set BB_APP_DIR." >&2; exit 1; }
+BB_BIN="$BB_APP_DIR/betterbird"
+[[ -x "$BB_BIN" ]] || BB_BIN="$BB_APP_DIR/thunderbird"
 
 # ── Pre-flight checks ──────────────────────────────────────
 if [[ ! -d "$DIST/native-host" || ! -d "$DIST/addon" ]]; then
@@ -28,9 +54,11 @@ if [[ ! -d "$DIST/native-host" || ! -d "$DIST/addon" ]]; then
 fi
 
 if [[ ! -x "$BB_BIN" ]]; then
-  echo "Error: Betterbird not found at $BB_BIN" >&2
+  echo "Error: Betterbird/Thunderbird binary not found at $BB_BIN" >&2
   exit 1
 fi
+
+echo ":: Detected app: $BB_BIN"
 
 # ── Resolve graphical session env ───────────────────────────
 _import_gui_env() {
@@ -50,7 +78,7 @@ _import_gui_env
 
 # ── Stop Betterbird ────────────────────────────────────────
 echo ":: Stopping Betterbird..."
-_pids() { pgrep -x betterbird 2>/dev/null; pgrep -x betterbird-bin 2>/dev/null; pgrep -f 'node.*host\.mjs' 2>/dev/null; }
+_pids() { pgrep -x betterbird 2>/dev/null; pgrep -x betterbird-bin 2>/dev/null; pgrep -x thunderbird 2>/dev/null; pgrep -x thunderbird-bin 2>/dev/null; pgrep -f 'node.*host\.mjs' 2>/dev/null; }
 kill $(_pids) 2>/dev/null || true
 for _ in $(seq 1 20); do
   [[ -z "$(_pids)" ]] && break
@@ -132,16 +160,29 @@ EOF
 echo "   → $BB_APP_DIR/distribution/policies.json"
 
 # ── Clean up profile caches and old installs ───────────────
+_find_profiles_ini() {
+  # Linux: ~/.thunderbird, macOS: ~/Library/Thunderbird
+  for dir in "$HOME/.thunderbird" "$HOME/Library/Thunderbird"; do
+    if [[ -f "$dir/profiles.ini" ]]; then
+      echo "$dir/profiles.ini"
+      return
+    fi
+  done
+  return 1
+}
+
 _cleanup_profile() {
-  local profiles_ini="$HOME/.thunderbird/profiles.ini"
-  [[ -f "$profiles_ini" ]] || return
+  local profiles_ini
+  profiles_ini="$(_find_profiles_ini)" || return
 
   # Find the locked profile
   local profile_rel
   profile_rel=$(awk -F= '/^\[Install/{found=1} found && /^Default=/{print $2; exit}' "$profiles_ini")
   [[ -n "$profile_rel" ]] || return
 
-  local profile_dir="$HOME/.thunderbird/$profile_rel"
+  local tb_dir
+  tb_dir="$(dirname "$profiles_ini")"
+  local profile_dir="$tb_dir/$profile_rel"
   [[ -d "$profile_dir" ]] || return
 
   # Remove old directory pointer or XPI from profile extensions
@@ -157,7 +198,9 @@ _cleanup_profile
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo ":: Creating default config..."
   mkdir -p "$(dirname "$CONFIG_FILE")"
-  TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))" 2>/dev/null \
+    || openssl rand -base64 32 2>/dev/null \
+    || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
   cat > "$CONFIG_FILE" <<EOF
 {
   "port": 17380,

@@ -739,4 +739,4 @@ startHttpServer({
   status,
 });
 
-send({ type: "host-ready", version: "0.2.0" });
+send({ type: "host-ready", version: "0.3.0" });
