@@ -299,7 +299,6 @@ async function assertFolderAllowlist({ messageIds, allowFolderIds }) {
 
 async function validateWriteCall(method, params) {
   const p = params && typeof params === "object" ? params : {};
-  const dryRun = Boolean(p.dryRun);
 
   const messageIds = normalizeIdList(p.messageIds);
   if (messageIds.length === 0) {
@@ -329,18 +328,17 @@ async function validateWriteCall(method, params) {
     }
   }
 
-  if (!cfg.writeEnabled && !dryRun) {
+  if (!cfg.writeEnabled) {
     throw new Error("Write methods are disabled (set write.enabled=true in config)");
   }
 
-  return { dryRun, messageIds };
+  return { messageIds };
 }
 
 async function validateComposeCall(method, params) {
   const p = params && typeof params === "object" ? params : {};
-  const dryRun = Boolean(p.dryRun);
 
-  if (!cfg.composeEnabled && !dryRun) {
+  if (!cfg.composeEnabled) {
     throw new Error("Compose/send methods are disabled (set compose.enabled=true in config)");
   }
 
@@ -359,8 +357,6 @@ async function validateComposeCall(method, params) {
       throw new Error("compose.forward requires at least one recipient in 'to'");
     }
   }
-
-  return { dryRun };
 }
 
 // ─── RPC handlers ──────────────────────────────────────────
@@ -517,56 +513,38 @@ const handlers = {
 
   // ── Write methods ──
 
-  async "messages.markRead"({ messageIds, dryRun = false } = {}) {
+  async "messages.markRead"({ messageIds } = {}) {
     const ids = normalizeIdList(messageIds);
-    if (dryRun) {
-      return { ok: true, dryRun: true, method: "messages.markRead", messageIds: ids, changes: { read: true } };
-    }
-
     for (const id of ids) {
       await api("messages", "update", id, { read: true });
     }
     return { ok: true, updatedCount: ids.length, messageIds: ids };
   },
 
-  async "messages.markUnread"({ messageIds, dryRun = false } = {}) {
+  async "messages.markUnread"({ messageIds } = {}) {
     const ids = normalizeIdList(messageIds);
-    if (dryRun) {
-      return { ok: true, dryRun: true, method: "messages.markUnread", messageIds: ids, changes: { read: false } };
-    }
-
     for (const id of ids) {
       await api("messages", "update", id, { read: false });
     }
     return { ok: true, updatedCount: ids.length, messageIds: ids };
   },
 
-  async "messages.move"({ messageIds, folderId, options, dryRun = false } = {}) {
+  async "messages.move"({ messageIds, folderId, options } = {}) {
     const ids = normalizeIdList(messageIds);
     if (!folderId) throw new Error("folderId is required");
-
-    if (dryRun) {
-      return { ok: true, dryRun: true, method: "messages.move", messageIds: ids, folderId, options: options ?? null };
-    }
-
     await api("messages", "move", ids, folderId, options);
     return { ok: true, movedCount: ids.length, messageIds: ids, folderId };
   },
 
-  async "messages.archive"({ messageIds, dryRun = false } = {}) {
+  async "messages.archive"({ messageIds } = {}) {
     const ids = normalizeIdList(messageIds);
-    if (dryRun) {
-      return { ok: true, dryRun: true, method: "messages.archive", messageIds: ids };
-    }
-
     await api("messages", "archive", ids);
     return { ok: true, archivedCount: ids.length, messageIds: ids };
   },
 
-  async "messages.trash"({ messageIds, dryRun = false } = {}) {
+  async "messages.trash"({ messageIds } = {}) {
     const ids = normalizeIdList(messageIds);
 
-    // Find the trash folder for each account.
     /** @type {Map<string, {messageIds: any[], trashFolderId: string | null}>} */
     const byAccount = new Map();
 
@@ -596,45 +574,28 @@ const handlers = {
       }
     }
 
-    const plan = [...byAccount.entries()].map(([accountId, entry]) => ({
-      accountId,
-      trashFolderId: entry.trashFolderId,
-      messageIds: entry.messageIds,
-    }));
-
-    if (dryRun) {
-      return { ok: true, dryRun: true, method: "messages.trash", plan };
-    }
-
     for (const entry of byAccount.values()) {
       await api("messages", "move", entry.messageIds, entry.trashFolderId);
     }
 
-    return { ok: true, trashedCount: ids.length, messageIds: ids, plan };
+    return { ok: true, trashedCount: ids.length, messageIds: ids };
   },
 
-  async "messages.delete"({ messageIds, dryRun = false } = {}) {
+  async "messages.delete"({ messageIds } = {}) {
     const ids = normalizeIdList(messageIds);
-
-    if (dryRun) {
-      return { ok: true, dryRun: true, method: "messages.delete", messageIds: ids, deletePermanently: true };
-    }
-
-    // Prefer the modern options object, fall back to legacy boolean.
     try {
       await api("messages", "delete", ids, { deletePermanently: true, isUserAction: true });
     } catch (_) {
       await api("messages", "delete", ids, true);
     }
-
-    return { ok: true, deletedCount: ids.length, messageIds: ids, deletePermanently: true };
+    return { ok: true, deletedCount: ids.length, messageIds: ids };
   },
 
   // ── Compose ──
 
   async "compose.new"({
     to, cc, bcc, subject, body, plainTextBody, isPlainText,
-    identityId, attachments, dryRun = false,
+    identityId, attachments,
   } = {}) {
     const details = {};
     if (to) details.to = Array.isArray(to) ? to : [to];
@@ -646,13 +607,6 @@ const handlers = {
     if (plainTextBody != null) details.plainTextBody = plainTextBody;
     if (identityId) details.identityId = identityId;
 
-    if (dryRun) {
-      return {
-        ok: true, dryRun: true, method: "compose.new",
-        details, attachmentCount: (attachments || []).length,
-      };
-    }
-
     const tab = await api("compose", "beginNew", null, details);
     const sendResult = await sendCompose(tab, attachments);
     return { ok: true, method: "compose.new", tabId: tab.id, sendResult };
@@ -661,7 +615,7 @@ const handlers = {
   async "compose.reply"({
     messageId, replyType = "replyToSender",
     body, plainTextBody, isPlainText,
-    identityId, attachments, dryRun = false,
+    identityId, attachments,
   } = {}) {
     if (!messageId) throw new Error("messageId is required");
 
@@ -671,14 +625,6 @@ const handlers = {
     if (plainTextBody != null) details.plainTextBody = plainTextBody;
     if (identityId) details.identityId = identityId;
 
-    if (dryRun) {
-      return {
-        ok: true, dryRun: true, method: "compose.reply",
-        messageId, replyType, details,
-        attachmentCount: (attachments || []).length,
-      };
-    }
-
     const tab = await api("compose", "beginReply", messageId, replyType, details);
     const sendResult = await sendCompose(tab, attachments);
     return { ok: true, method: "compose.reply", messageId, replyType, tabId: tab.id, sendResult };
@@ -687,7 +633,7 @@ const handlers = {
   async "compose.forward"({
     messageId, forwardType = "forwardAsAttachment",
     to, cc, bcc, body, plainTextBody, isPlainText,
-    identityId, attachments, dryRun = false,
+    identityId, attachments,
   } = {}) {
     if (!messageId) throw new Error("messageId is required");
 
@@ -699,14 +645,6 @@ const handlers = {
     if (body != null) details.body = body;
     if (plainTextBody != null) details.plainTextBody = plainTextBody;
     if (identityId) details.identityId = identityId;
-
-    if (dryRun) {
-      return {
-        ok: true, dryRun: true, method: "compose.forward",
-        messageId, forwardType, details,
-        attachmentCount: (attachments || []).length,
-      };
-    }
 
     const tab = await api("compose", "beginForward", messageId, forwardType, details);
     const sendResult = await sendCompose(tab, attachments);

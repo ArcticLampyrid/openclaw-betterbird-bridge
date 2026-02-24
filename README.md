@@ -106,34 +106,30 @@ curl -s -X POST \
 | `messages.latest` | Get latest N messages from a folder (returns headers only) |
 | `messages.search` | Search messages with queryInfo (returns headers only) |
 | `messages.unread` | Get unread messages across all accounts/folders (returns headers only, sorted by date desc) |
-| `messages.markRead` | Mark messages as read *(write; supports `dryRun`)* |
-| `messages.markUnread` | Mark messages as unread *(write; supports `dryRun`)* |
-| `messages.move` | Move messages to a folder *(write; supports `dryRun`; can require `allowFolderIds`)* |
-| `messages.archive` | Archive messages using Thunderbird settings *(write; supports `dryRun`; can require `allowFolderIds`)* |
-| `messages.trash` | Move messages to their account trash folder *(write; supports `dryRun`; can require `allowFolderIds`)* |
-| `messages.delete` | Permanently delete messages *(write; **gated**; supports `dryRun`; can require `allowFolderIds`)* |
-| `compose.new` | Compose and send a new email *(compose; supports `dryRun`)* |
-| `compose.reply` | Reply to a message *(compose; supports `dryRun`)* |
-| `compose.forward` | Forward a message *(compose; supports `dryRun`)* |
+| `messages.markRead` | Mark messages as read *(write)* |
+| `messages.markUnread` | Mark messages as unread *(write)* |
+| `messages.move` | Move messages to a folder *(write)* |
+| `messages.archive` | Archive messages using Thunderbird settings *(write)* |
+| `messages.trash` | Move messages to their account trash folder *(write)* |
+| `messages.delete` | Permanently delete messages *(write; **gated**)* |
+| `compose.new` | Compose and send a new email *(compose)* |
+| `compose.reply` | Reply to a message *(compose)* |
+| `compose.forward` | Forward a message *(compose)* |
 
-### Compose guard rails
+### Compose
 
-Compose methods (`compose.new`, `compose.reply`, `compose.forward`) are gated by `compose.enabled` in config (default: `false`).
+Compose methods are gated by `compose.enabled` in config (default: `false`).
 
-- `dryRun: true` — validate and return a plan without actually sending.
 - `compose.new` requires at least one `to` recipient.
 - `compose.reply` / `compose.forward` require `messageId`.
 - `compose.forward` additionally requires at least one `to` recipient.
 - Attachments can be included as `[{ name, contentBase64, contentType }]`.
 
-### Write guard rails
+### Write
 
-The HTTP server enforces a few safety defaults:
-
-- `dryRun: true` — validate and return a plan without performing the write.
-- `allowFolderIds: [ ... ]` — optional per-call allowlist. For destructive methods (move/archive/trash/delete), if provided, the current folder of each message must be in this list. For `messages.move`, the destination `folderId` must also be in the list.
 - Write methods require `write.enabled: true` in config.
 - `messages.delete` additionally requires `write.allowHardDelete: true` and `confirm: "DELETE"`.
+- `allowFolderIds` can be passed per-call for destructive methods to restrict which folders can be affected.
 
 ### Smoke Test
 
@@ -149,7 +145,7 @@ The HTTP server enforces a few safety defaults:
 - ✅ End-to-end smoke test working inside Betterbird (`/health`, `ping`, `accounts.list`).
 - ✅ OpenClaw skill created (`~/.openclaw/skills/betterbird-bridge/`) with helper script
 - ✅ Request correlation IDs and improved error responses (method name in errors)
-- ✅ Extended smoke tests (folders, message body, attachments, compose dryRun)
+- ✅ Extended smoke tests (folders, message body, attachments, compose)
 
 ## Roadmap / TODO
 
