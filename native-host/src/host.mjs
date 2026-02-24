@@ -484,6 +484,23 @@ const handlers = {
     return headers.slice(0, targetCount);
   },
 
+  async "messages.unread"({ accountId, folderId, count = 25 } = {}) {
+    const targetCount = Math.max(0, Number(count) || 0);
+    if (targetCount === 0) return [];
+
+    const queryInfo = { unread: true };
+    if (accountId) queryInfo.accountId = accountId;
+    if (folderId) {
+      queryInfo.folderId = folderId;
+      queryInfo.includeSubFolders = true;
+    }
+
+    const listResult = await api("messages", "query", queryInfo);
+    const headers = await drainMessageList(listResult);
+    headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return headers.slice(0, targetCount);
+  },
+
   // ── Raw / Attachments ──
 
   async "messages.getRaw"({ messageId } = {}) {

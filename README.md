@@ -105,6 +105,7 @@ curl -s -X POST \
 | `messages.read` | Get message header + body + attachments |
 | `messages.latest` | Get latest N messages from a folder (returns headers only) |
 | `messages.search` | Search messages with queryInfo (returns headers only) |
+| `messages.unread` | Get unread messages across all accounts/folders (returns headers only, sorted by date desc) |
 | `messages.markRead` | Mark messages as read *(write; supports `dryRun`)* |
 | `messages.markUnread` | Mark messages as unread *(write; supports `dryRun`)* |
 | `messages.move` | Move messages to a folder *(write; supports `dryRun`; can require `allowFolderIds`)* |
