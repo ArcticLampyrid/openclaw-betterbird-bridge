@@ -7,6 +7,7 @@ const cfg = loadConfig();
 
 let connected = false;
 let addon = { version: null };
+let browserVersion = 0; // major version, lazily detected
 let nextId = 1;
 
 /** @type {Map<number, {resolve: Function, reject: Function, timeout: NodeJS.Timeout}>} */
@@ -187,6 +188,26 @@ async function sendCompose(tab, attachments) {
   return await api("compose", "sendMessage", tab.id, { mode: "sendNow" });
 }
 
+// ─── Version detection ─────────────────────────────────────
+
+async function detectBrowserVersion() {
+  if (browserVersion > 0) return browserVersion;
+  try {
+    const info = await api("runtime", "getBrowserInfo");
+    browserVersion = parseInt(info?.version, 10) || 0;
+  } catch (_) {
+    browserVersion = 0;
+  }
+  return browserVersion;
+}
+
+/**
+ * Whether messages.list supports sort options (TB 148+).
+ */
+async function supportsListSortOptions() {
+  return (await detectBrowserVersion()) >= 148;
+}
+
 // ─── Pagination helpers ────────────────────────────────────
 
 /**
@@ -266,12 +287,33 @@ function createTopN(count) {
 }
 
 /**
+ * Collect up to `count` messages from a pre-sorted MessageList.
+ * Stops reading pages once enough messages are collected.
+ */
+async function collectFromList(listResult, count) {
+  const headers = [];
+  await forEachPage(listResult, (msgs) => {
+    if (headers.length < count) headers.push(...msgs);
+  });
+  return headers.slice(0, count);
+}
+
+/**
  * Get the latest N messages from a single folder.
- * Iterates all pages but only keeps the top N in memory.
+ * On TB 148+: uses sorted list (fast, early termination).
+ * On older versions: iterates all pages with a top-N min-heap.
  */
 async function listLatestFromFolder({ folderId, count }) {
   const targetCount = Math.max(0, Number(count) || 0);
   if (targetCount === 0) return [];
+
+  if (await supportsListSortOptions()) {
+    const listResult = await api("messages", "list", folderId, {
+      sortType: "date",
+      sortOrder: "descending",
+    });
+    return await collectFromList(listResult, targetCount);
+  }
 
   const listResult = await api("messages", "list", folderId);
   const topN = createTopN(targetCount);
