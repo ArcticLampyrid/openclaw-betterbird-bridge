@@ -248,19 +248,17 @@ async function collectFromMessageList(listResult, count) {
 
 /**
  * Get the latest N messages from a single folder.
- * Uses messages.list with explicit date-descending sort so we can
- * stop reading after enough messages are collected.
+ * Drains all messages and sorts by date descending, since the
+ * return order of messages.list is not guaranteed.
  */
 async function listLatestFromFolder({ folderId, count }) {
   const targetCount = Math.max(0, Number(count) || 0);
   if (targetCount === 0) return [];
 
-  const listResult = await api("messages", "list", folderId, {
-    sortType: "date",
-    sortOrder: "descending",
-  });
-
-  return await collectFromMessageList(listResult, targetCount);
+  const listResult = await api("messages", "list", folderId);
+  const headers = await drainMessageList(listResult);
+  headers.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return headers.slice(0, targetCount);
 }
 
 // ─── Security validation ───────────────────────────────────
