@@ -218,35 +218,6 @@ async function drainMessageList(listResult) {
 }
 
 /**
- * Collect up to `count` messages from a paginated MessageList result.
- * Stops reading pages as soon as enough messages are collected.
- */
-async function collectFromMessageList(listResult, count) {
-  if (!listResult) return [];
-
-  const headers = [...(listResult.messages || [])];
-  const messageListId = listResult.id;
-
-  if (messageListId && headers.length < count) {
-    try {
-      while (headers.length < count) {
-        const contResult = await api("messages", "continueList", messageListId);
-        if (!contResult?.messages?.length) break;
-        headers.push(...contResult.messages);
-      }
-    } catch (_) {
-      // exhausted
-    }
-
-    try { await api("messages", "abortList", messageListId); } catch (_) { /* already done */ }
-  } else if (messageListId) {
-    try { await api("messages", "abortList", messageListId); } catch (_) { /* ok */ }
-  }
-
-  return headers.slice(0, count);
-}
-
-/**
  * Get the latest N messages from a single folder.
  * Drains all messages and sorts by date descending, since the
  * return order of messages.list is not guaranteed.
