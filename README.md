@@ -37,6 +37,7 @@ bb-rpc <method> [json-params]
 
 ```bash
 bb-rpc messages.unread '{}'                                        # all unread mail
+bb-rpc messages.unread '{"markAsRead":true}'                        # fetch unread then mark them read
 bb-rpc messages.latest '{"folderId":"account1://INBOX","count":5}' # latest 5 in inbox
 bb-rpc messages.read '{"messageId":12345}'                         # full body + attachments
 bb-rpc messages.search '{"folderId":"ID","queryInfo":{"subject":"invoice"},"count":10}'

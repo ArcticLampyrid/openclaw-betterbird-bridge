@@ -37,7 +37,7 @@ Returns JSON: `{"id":...,"ok":true,"result":{...}}` or `{"id":...,"ok":false,"er
 | `messages.latest` | `{folderId, count?}` | Latest N messages from a folder (default 10) |
 | `messages.latestAll` | `{accountId?, count?}` | Latest N messages across all folders (default 10) |
 | `messages.search` | `{folderId, queryInfo?, count?}` | Search with queryInfo filter |
-| `messages.unread` | `{accountId?, folderId?, count?}` | Unread messages across all accounts/folders (default 25) |
+| `messages.unread` | `{accountId?, folderId?, count?, markAsRead?}` | Unread messages across all accounts/folders (default 25). Pass `markAsRead: true` to auto-mark the returned messages as read. |
 | `messages.getRaw` | `{messageId}` | Full RFC 822 source as base64 |
 | `attachments.get` | `{messageId, partName}` | Attachment content as base64 |
 
@@ -66,6 +66,8 @@ Returns JSON: `{"id":...,"ok":true,"result":{...}}` or `{"id":...,"ok":false,"er
 
 ```bash
 bb-rpc messages.unread '{}'
+# or fetch & mark as read in one call:
+bb-rpc messages.unread '{"markAsRead":true}'
 ```
 
 ### Read an Email

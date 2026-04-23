@@ -112,7 +112,7 @@ export function createReadHandlers({
       return topN.result();
     },
 
-    async "messages.unread"({ accountId, folderId, count = 25 } = {}) {
+    async "messages.unread"({ accountId, folderId, count = 25, markAsRead = false } = {}) {
       const targetCount = normalizeCount(count, 25);
       if (targetCount === 0) return [];
 
@@ -126,7 +126,17 @@ export function createReadHandlers({
       const listResult = await api("messages", "query", queryInfo);
       const topN = createTopN(targetCount);
       await forEachPage(listResult, (messages) => topN.insert(messages));
-      return topN.result();
+      const results = topN.result();
+
+      if (markAsRead && results.length > 0) {
+        for (const msg of results) {
+          if (msg?.id != null) {
+            await api("messages", "update", msg.id, { read: true });
+          }
+        }
+      }
+
+      return results;
     },
 
     async "messages.getRaw"({ messageId } = {}) {

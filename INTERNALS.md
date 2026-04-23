@@ -84,7 +84,7 @@ Betterbird (Thunderbird ESR) requires addon signatures for profile-level install
 | `messages.latest` | `{folderId, count?}` | Latest N messages from a folder (default 10) |
 | `messages.latestAll` | `{accountId?, count?}` | Latest N messages across all folders (default 10) |
 | `messages.search` | `{folderId, queryInfo?, count?}` | Search with queryInfo filter |
-| `messages.unread` | `{accountId?, folderId?, count?}` | Unread messages across accounts/folders (default 25) |
+| `messages.unread` | `{accountId?, folderId?, count?, markAsRead?}` | Unread messages across accounts/folders (default 25). When `markAsRead: true`, returned messages are marked as read after the response is prepared. |
 | `messages.getRaw` | `{messageId}` | Full RFC 822 source as base64 |
 | `attachments.get` | `{messageId, partName}` | Attachment content as base64 |
 | `attachments.save` | `{messageId, partName}` | Same as attachments.get |
