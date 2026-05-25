@@ -27,7 +27,7 @@ function compilePayloadScript(script) {
 
   // The config file is local/trusted. Use a function body so users can write
   // normal JavaScript and `return` any JSON-serializable webhook body.
-  return new Function("payload", `"use strict";\n${script}`);
+  return new Function("event", `"use strict";\n${script}`);
 }
 
 function normalizeNewMailWebhook(cfg = {}) {
@@ -49,15 +49,10 @@ function normalizeNewMailWebhook(cfg = {}) {
   };
 }
 
-function getEventPayload(event) {
-  return event?.payload;
-}
-
 function buildWebhookPayload(config, event) {
-  const incoming = getEventPayload(event);
-  if (!config.buildPayload) return incoming;
+  if (!config.buildPayload) return event?.payload;
 
-  const result = config.buildPayload(incoming);
+  const result = config.buildPayload(event);
   if (result == null) {
     throw new Error("webhooks.newMail.payloadScript returned null or undefined");
   }
