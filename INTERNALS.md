@@ -11,6 +11,7 @@ native-host/    Native Messaging host (Node.js), spawned by addon
     host.mjs      Entry point, RPC dispatcher
     http.mjs      Unix socket HTTP server
     config.mjs    Config loader (XDG paths)
+    webhook.mjs   Optional outbound webhook delivery
     rpc/
       handlers/   read.mjs, write.mjs, compose.mjs
       utils.mjs   Shared helpers (topN heap, folder walker)
@@ -43,6 +44,29 @@ This is a local-only, trusted-caller design. The OS file permissions are the sec
 ```
 
 All fields are optional. The host uses sensible XDG-based defaults.
+
+Optional new-mail webhook:
+
+```json
+{
+  "webhooks": {
+    "newMail": {
+      "url": "https://example.invalid/mail-webhook",
+      "headers": {
+        "authorization": "***"
+      },
+      "timeoutMs": 10000,
+      "payloadScript": "return { text: `收到一封新邮件：${JSON.stringify(event.payload)}`, mode: 'now' };"
+    }
+  }
+}
+```
+
+New-mail webhook events are sourced from `messages.onNewMailReceived` after message filters and junk classification. The addon subscribes with `monitorAllFolders=true` and fully drains the paginated `MessageList` before posting, so every batch is delivered as a single array. The default payload is the same message-header array shape returned by `messages.unread`. Bodies and attachment bytes stay behind the local RPC API.
+
+`payloadScript` is optional local/trusted JavaScript configuration. It is compiled as a function body and receives one argument: `event`, exposing `event.name` (e.g. `messages.newMail`) and `event.payload` (the default message-header array). String return values are sent verbatim as the request body; any other return value is JSON-encoded before being posted.
+
+Delivery is best-effort: events are queued in memory, sent sequentially, and failures are reported in `/health` under `webhooks`.
 
 ## Installation Layout
 

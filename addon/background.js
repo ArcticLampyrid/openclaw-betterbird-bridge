@@ -7,6 +7,7 @@ const NATIVE_APP = "ai.openclaw.betterbird_bridge";
 
 let port = null;
 let nextId = 1;
+let newMailListenerRegistered = false;
 
 function log(...args) {
   // eslint-disable-next-line no-console
@@ -175,6 +176,70 @@ const handlers = {
   },
 };
 
+
+function postEvent(name, payload) {
+  if (!port) return;
+
+  try {
+    port.postMessage({
+      type: "event",
+      name,
+      receivedAt: new Date().toISOString(),
+      payload,
+    });
+  } catch (err) {
+    log("failed to post event", name, err);
+  }
+}
+
+async function drainMessageList(initialList) {
+  const payload = Array.isArray(initialList?.messages) ? [...initialList.messages] : [];
+  const listId = initialList?.id || null;
+
+  if (!listId) return payload;
+
+  try {
+    while (true) {
+      const page = await B.messages.continueList(listId);
+      const batch = Array.isArray(page?.messages) ? page.messages : [];
+      if (!batch.length) break;
+      payload.push(...batch);
+      if (!page?.id) break;
+    }
+  } catch (err) {
+    // Thunderbird throws when the list is exhausted — that's fine.
+    log("continueList ended", err?.message);
+  }
+
+  try {
+    await B.messages.abortList(listId);
+  } catch (_) {
+    // already done
+  }
+
+  return payload;
+}
+
+function setupNewMailListener() {
+  if (newMailListenerRegistered) return;
+  const event = B.messages?.onNewMailReceived;
+  if (!event || typeof event.addListener !== "function") {
+    log("messages.onNewMailReceived is unavailable");
+    return;
+  }
+
+  event.addListener(async (_folder, messageList) => {
+    try {
+      const payload = await drainMessageList(messageList);
+      postEvent("messages.newMail", payload);
+    } catch (err) {
+      log("failed to handle new mail event", err);
+    }
+  }, /* monitorAllFolders */ true);
+  newMailListenerRegistered = true;
+  log("registered new mail listener (monitorAllFolders=true)");
+}
+
 // ─── Native Messaging ──────────────────────────────────────
 
 async function handleNativeMessage(msg) {
@@ -221,6 +286,7 @@ function connectNative() {
   });
 
   port.postMessage({ type: "hello", id: nextId++, addonVersion: "0.3.0" });
+  setupNewMailListener();
   log("connected to native host", NATIVE_APP);
 }
 

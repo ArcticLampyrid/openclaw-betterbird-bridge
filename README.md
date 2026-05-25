@@ -58,6 +58,54 @@ bb-rpc compose.new '{"to":"bob@example.com","subject":"Hello","body":"<p>Hi!</p>
 bb-rpc compose.reply '{"messageId":12345,"body":"<p>Thanks!</p>"}'
 ```
 
+### New Mail Webhook
+
+Optionally POST a JSON notification whenever Thunderbird/Betterbird reports newly received mail. The bridge subscribes with `monitorAllFolders=true`, so every folder is watched — not just inboxes. Add a `webhooks.newMail` block to `~/.config/betterbird-bridge/config.json` and restart Betterbird/Thunderbird:
+
+```json
+{
+  "socketPath": "/run/user/1000/betterbird-bridge/bridge.sock",
+  "webhooks": {
+    "newMail": {
+      "url": "https://example.invalid/mail-webhook",
+      "headers": {
+        "authorization": "***"
+      },
+      "timeoutMs": 10000
+    }
+  }
+}
+```
+
+By default, the webhook body is the same message-header array shape returned by `messages.unread`:
+
+```json
+[
+  {
+    "id": 12345,
+    "author": "alice@example.com",
+    "subject": "Hello",
+    "date": "...",
+    "folder": { "accountId": "account1", "path": "/INBOX" }
+  }
+]
+```
+
+You can customize the posted body with JavaScript in `payloadScript`. The script receives one parameter, `event`, with `event.name` (e.g. `messages.newMail`) and `event.payload` (the default message-header array described above). Return a string to send it verbatim (already-encoded JSON, plain text, etc.); return any other value to have it JSON-encoded for you. For example, to call an OpenClaw-style wake webhook:
+
+```json
+{
+  "webhooks": {
+    "newMail": {
+      "url": "https://example.invalid/openclaw/wake",
+      "payloadScript": "return { text: `收到一封新邮件：${JSON.stringify(event.payload)}`, mode: 'now' };"
+    }
+  }
+}
+```
+
+Message bodies and attachment contents are not pushed by default; call `messages.read` if your receiver needs the full content.
+
 ### All Methods
 
 See [INTERNALS.md](INTERNALS.md#available-methods) for the complete method reference.
