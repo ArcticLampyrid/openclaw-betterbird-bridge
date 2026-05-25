@@ -71,13 +71,20 @@ async function postJson({ url, headers, timeoutMs, body }) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    // Apply defaults without overriding anything the user explicitly set.
+    // Using `Headers` makes the merge case-insensitive (e.g. user-supplied
+    // "Content-Type" still wins over the default "content-type").
+    const requestHeaders = new Headers(headers);
+    if (!requestHeaders.has("content-type")) {
+      requestHeaders.set("content-type", "application/json");
+    }
+    if (!requestHeaders.has("user-agent")) {
+      requestHeaders.set("user-agent", "openclaw-betterbird-bridge");
+    }
+
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "user-agent": "openclaw-betterbird-bridge",
-        ...headers,
-      },
+      headers: requestHeaders,
       body,
       signal: controller.signal,
     });
