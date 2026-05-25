@@ -49,17 +49,24 @@ function normalizeNewMailWebhook(cfg = {}) {
   };
 }
 
-function buildWebhookPayload(config, event) {
-  if (!config.buildPayload) return event?.payload;
+function buildWebhookBody(config, event) {
+  if (!config.buildPayload) {
+    return JSON.stringify(event?.payload);
+  }
 
   const result = config.buildPayload(event);
   if (result == null) {
     throw new Error("webhooks.newMail.payloadScript returned null or undefined");
   }
-  return result;
+
+  // Strings are sent verbatim, so users who already JSON-encoded their
+  // payload (or want to send non-JSON text) don't get double-encoded.
+  if (typeof result === "string") return result;
+
+  return JSON.stringify(result);
 }
 
-async function postJson({ url, headers, timeoutMs, payload }) {
+async function postJson({ url, headers, timeoutMs, body }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -71,7 +78,7 @@ async function postJson({ url, headers, timeoutMs, payload }) {
         "user-agent": "openclaw-betterbird-bridge",
         ...headers,
       },
-      body: JSON.stringify(payload),
+      body,
       signal: controller.signal,
     });
 
@@ -128,7 +135,7 @@ export function createWebhookDispatcher({ cfg, onError = null } = {}) {
     }
   }
 
-  function enqueue(config, payload) {
+  function enqueue(config, body) {
     if (queue.length >= MAX_QUEUE) {
       queue.shift();
       dropped += 1;
@@ -138,7 +145,7 @@ export function createWebhookDispatcher({ cfg, onError = null } = {}) {
       url: config.url,
       headers: config.headers,
       timeoutMs: config.timeoutMs,
-      payload,
+      body,
     });
 
     void drain();
@@ -149,7 +156,7 @@ export function createWebhookDispatcher({ cfg, onError = null } = {}) {
     if (!newMailWebhook) return false;
 
     try {
-      enqueue(newMailWebhook, buildWebhookPayload(newMailWebhook, event));
+      enqueue(newMailWebhook, buildWebhookBody(newMailWebhook, event));
       return true;
     } catch (err) {
       recordFailure(err);

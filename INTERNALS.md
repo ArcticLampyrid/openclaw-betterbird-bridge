@@ -64,7 +64,7 @@ Optional new-mail webhook:
 
 New-mail webhook events are sourced from `messages.onNewMailReceived` after message filters and junk classification. The addon subscribes with `monitorAllFolders=true` and fully drains the paginated `MessageList` before posting, so every batch is delivered as a single array. The default payload is the same message-header array shape returned by `messages.unread`. Bodies and attachment bytes stay behind the local RPC API.
 
-`payloadScript` is optional local/trusted JavaScript configuration. It is compiled as a function body and receives one argument: `event`, exposing `event.name` (e.g. `messages.newMail`) and `event.payload` (the default message-header array). The return value is JSON-serialized as the webhook body.
+`payloadScript` is optional local/trusted JavaScript configuration. It is compiled as a function body and receives one argument: `event`, exposing `event.name` (e.g. `messages.newMail`) and `event.payload` (the default message-header array). String return values are sent verbatim as the request body; any other return value is JSON-encoded before being posted.
 
 Delivery is best-effort: events are queued in memory, sent sequentially, and failures are reported in `/health` under `webhooks`.
 
