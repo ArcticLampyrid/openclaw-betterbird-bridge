@@ -62,7 +62,7 @@ Optional new-mail webhook:
 }
 ```
 
-New-mail webhook events are sourced from `messages.onNewMailReceived` after message filters and junk classification. The default payload is the raw message-header array from Thunderbird, matching the shape returned by `messages.unread`. Bodies and attachment bytes stay behind the local RPC API.
+New-mail webhook events are sourced from `messages.onNewMailReceived` after message filters and junk classification. The addon subscribes with `monitorAllFolders=true` and fully drains the paginated `MessageList` before posting, so every batch is delivered as a single array. The default payload is the same message-header array shape returned by `messages.unread`. Bodies and attachment bytes stay behind the local RPC API.
 
 `payloadScript` is optional local/trusted JavaScript configuration. It is compiled as a function body and receives one argument: `messages`. The return value is JSON-serialized as the webhook body.
 

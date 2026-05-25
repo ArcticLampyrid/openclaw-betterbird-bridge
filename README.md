@@ -60,7 +60,7 @@ bb-rpc compose.reply '{"messageId":12345,"body":"<p>Thanks!</p>"}'
 
 ### New Mail Webhook
 
-Optionally POST a JSON notification whenever Thunderbird/Betterbird reports newly received mail. Add a `webhooks.newMail` block to `~/.config/betterbird-bridge/config.json` and restart Betterbird/Thunderbird:
+Optionally POST a JSON notification whenever Thunderbird/Betterbird reports newly received mail. The bridge subscribes with `monitorAllFolders=true`, so every folder is watched — not just inboxes. Add a `webhooks.newMail` block to `~/.config/betterbird-bridge/config.json` and restart Betterbird/Thunderbird:
 
 ```json
 {

@@ -192,6 +192,34 @@ function postEvent(name, payload) {
   }
 }
 
+async function drainMessageList(initialList) {
+  const messages = Array.isArray(initialList?.messages) ? [...initialList.messages] : [];
+  const listId = initialList?.id || null;
+
+  if (!listId) return messages;
+
+  try {
+    while (true) {
+      const page = await B.messages.continueList(listId);
+      const batch = Array.isArray(page?.messages) ? page.messages : [];
+      if (!batch.length) break;
+      messages.push(...batch);
+      if (!page?.id) break;
+    }
+  } catch (err) {
+    // Thunderbird throws when the list is exhausted — that's fine.
+    log("continueList ended", err?.message);
+  }
+
+  try {
+    await B.messages.abortList(listId);
+  } catch (_) {
+    // already done
+  }
+
+  return messages;
+}
+
 function setupNewMailListener() {
   if (newMailListenerRegistered) return;
   const event = B.messages?.onNewMailReceived;
@@ -200,15 +228,16 @@ function setupNewMailListener() {
     return;
   }
 
-  event.addListener((folder, messageList) => {
-    postEvent("messages.newMail", {
-      folder,
-      messages: Array.isArray(messageList?.messages) ? messageList.messages : [],
-      messageListId: messageList?.id || null,
-    });
-  });
+  event.addListener(async (folder, messageList) => {
+    try {
+      const messages = await drainMessageList(messageList);
+      postEvent("messages.newMail", { folder, messages });
+    } catch (err) {
+      log("failed to handle new mail event", err);
+    }
+  }, /* monitorAllFolders */ true);
   newMailListenerRegistered = true;
-  log("registered new mail listener");
+  log("registered new mail listener (monitorAllFolders=true)");
 }
 
 // ─── Native Messaging ──────────────────────────────────────
