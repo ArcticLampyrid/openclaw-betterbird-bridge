@@ -7,6 +7,7 @@ const NATIVE_APP = "ai.openclaw.betterbird_bridge";
 
 let port = null;
 let nextId = 1;
+let newMailListenerRegistered = false;
 
 function log(...args) {
   // eslint-disable-next-line no-console
@@ -175,6 +176,41 @@ const handlers = {
   },
 };
 
+
+function postEvent(name, payload) {
+  if (!port) return;
+
+  try {
+    port.postMessage({
+      type: "event",
+      name,
+      receivedAt: new Date().toISOString(),
+      payload,
+    });
+  } catch (err) {
+    log("failed to post event", name, err);
+  }
+}
+
+function setupNewMailListener() {
+  if (newMailListenerRegistered) return;
+  const event = B.messages?.onNewMailReceived;
+  if (!event || typeof event.addListener !== "function") {
+    log("messages.onNewMailReceived is unavailable");
+    return;
+  }
+
+  event.addListener((folder, messageList) => {
+    postEvent("messages.newMail", {
+      folder,
+      messages: Array.isArray(messageList?.messages) ? messageList.messages : [],
+      messageListId: messageList?.id || null,
+    });
+  });
+  newMailListenerRegistered = true;
+  log("registered new mail listener");
+}
+
 // ─── Native Messaging ──────────────────────────────────────
 
 async function handleNativeMessage(msg) {
@@ -221,6 +257,7 @@ function connectNative() {
   });
 
   port.postMessage({ type: "hello", id: nextId++, addonVersion: "0.3.0" });
+  setupNewMailListener();
   log("connected to native host", NATIVE_APP);
 }
 

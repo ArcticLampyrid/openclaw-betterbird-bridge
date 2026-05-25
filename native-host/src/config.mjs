@@ -38,5 +38,5 @@ export function loadConfig() {
     process.env.OPENCLAW_BB_SOCKET_PATH ?? cfg.socketPath ?? DEFAULT_SOCKET_PATH,
   );
 
-  return { cfgPath, socketPath };
+  return { ...cfg, cfgPath, socketPath };
 }

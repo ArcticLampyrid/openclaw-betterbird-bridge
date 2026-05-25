@@ -8,8 +8,16 @@ import { createComposeHelpers } from "./rpc/compose.mjs";
 import { createReadHandlers } from "./rpc/handlers/read.mjs";
 import { createWriteHandlers } from "./rpc/handlers/write.mjs";
 import { createComposeHandlers } from "./rpc/handlers/compose.mjs";
+import { createWebhookDispatcher } from "./webhook.mjs";
 
 const cfg = loadConfig();
+const webhooks = createWebhookDispatcher({
+  cfg,
+  onError: (err) => {
+    // stdout is reserved for native messaging frames. stderr is safe for diagnostics.
+    console.error("[openclaw-bb] webhook delivery failed", err?.message || err);
+  },
+});
 
 let connected = false;
 let addon = { version: null };
@@ -29,6 +37,11 @@ function onNativeMessage(msg) {
   if (msg.type === "hello") {
     connected = true;
     addon.version = msg.addonVersion || null;
+    return;
+  }
+
+  if (msg.type === "event") {
+    webhooks.handleEvent(msg);
     return;
   }
 
@@ -130,6 +143,7 @@ function status() {
       kind: "unix_socket",
       socketPath: cfg.socketPath,
     },
+    webhooks: webhooks.status(),
   };
 }
 

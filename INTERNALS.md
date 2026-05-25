@@ -11,6 +11,7 @@ native-host/    Native Messaging host (Node.js), spawned by addon
     host.mjs      Entry point, RPC dispatcher
     http.mjs      Unix socket HTTP server
     config.mjs    Config loader (XDG paths)
+    webhook.mjs   Optional outbound webhook delivery
     rpc/
       handlers/   read.mjs, write.mjs, compose.mjs
       utils.mjs   Shared helpers (topN heap, folder walker)
@@ -43,6 +44,29 @@ This is a local-only, trusted-caller design. The OS file permissions are the sec
 ```
 
 All fields are optional. The host uses sensible XDG-based defaults.
+
+Optional new-mail webhook:
+
+```json
+{
+  "webhooks": {
+    "newMail": {
+      "url": "https://example.invalid/mail-webhook",
+      "headers": {
+        "authorization": "***"
+      },
+      "timeoutMs": 10000,
+      "payloadScript": "return { text: `收到一封新邮件：${JSON.stringify(messages)}`, mode: 'now' };"
+    }
+  }
+}
+```
+
+New-mail webhook events are sourced from `messages.onNewMailReceived` after message filters and junk classification. The default payload is the raw message-header array from Thunderbird, matching the shape returned by `messages.unread`. Bodies and attachment bytes stay behind the local RPC API.
+
+`payloadScript` is optional local/trusted JavaScript configuration. It is compiled as a function body and receives one argument: `messages`. The return value is JSON-serialized as the webhook body.
+
+Delivery is best-effort: events are queued in memory, sent sequentially, and failures are reported in `/health` under `webhooks`.
 
 ## Installation Layout
 
