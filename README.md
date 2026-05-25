@@ -91,14 +91,14 @@ By default, the webhook body is the same message-header array shape returned by 
 ]
 ```
 
-You can customize the posted JSON with JavaScript in `payloadScript`. The script receives one parameter, `messages`, and must `return` a JSON-serializable value. For example, to call an OpenClaw-style wake webhook:
+You can customize the posted JSON with JavaScript in `payloadScript`. The script receives one parameter, `payload` (the default message-header array described above), and must `return` a JSON-serializable value. For example, to call an OpenClaw-style wake webhook:
 
 ```json
 {
   "webhooks": {
     "newMail": {
       "url": "https://example.invalid/openclaw/wake",
-      "payloadScript": "return { text: `收到一封新邮件：${JSON.stringify(messages)}`, mode: 'now' };"
+      "payloadScript": "return { text: `收到一封新邮件：${JSON.stringify(payload)}`, mode: 'now' };"
     }
   }
 }

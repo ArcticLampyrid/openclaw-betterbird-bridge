@@ -193,17 +193,17 @@ function postEvent(name, payload) {
 }
 
 async function drainMessageList(initialList) {
-  const messages = Array.isArray(initialList?.messages) ? [...initialList.messages] : [];
+  const payload = Array.isArray(initialList?.messages) ? [...initialList.messages] : [];
   const listId = initialList?.id || null;
 
-  if (!listId) return messages;
+  if (!listId) return payload;
 
   try {
     while (true) {
       const page = await B.messages.continueList(listId);
       const batch = Array.isArray(page?.messages) ? page.messages : [];
       if (!batch.length) break;
-      messages.push(...batch);
+      payload.push(...batch);
       if (!page?.id) break;
     }
   } catch (err) {
@@ -217,7 +217,7 @@ async function drainMessageList(initialList) {
     // already done
   }
 
-  return messages;
+  return payload;
 }
 
 function setupNewMailListener() {
@@ -228,10 +228,10 @@ function setupNewMailListener() {
     return;
   }
 
-  event.addListener(async (folder, messageList) => {
+  event.addListener(async (_folder, messageList) => {
     try {
-      const messages = await drainMessageList(messageList);
-      postEvent("messages.newMail", { folder, messages });
+      const payload = await drainMessageList(messageList);
+      postEvent("messages.newMail", payload);
     } catch (err) {
       log("failed to handle new mail event", err);
     }
